@@ -1,0 +1,109 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>YouTube Downloader</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+            background-color: #f4f6f8;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+            margin: 0;
+        }
+        .container {
+            background: white;
+            padding: 2rem;
+            border-radius: 12px;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+            width: 100%;
+            max-width: 480px;
+            text-align: center;
+        }
+        h1 {
+            font-size: 1.5rem;
+            margin-bottom: 1.5rem;
+            color: #333;
+        }
+        input[type="url"] {
+            width: 100%;
+            padding: 12px;
+            border: 1px solid #ccc;
+            border-radius: 6px;
+            box-sizing: border-box;
+            font-size: 1rem;
+            margin-bottom: 1.2rem;
+        }
+        .btn-group {
+            display: flex;
+            gap: 10px;
+        }
+        button {
+            flex: 1;
+            padding: 12px;
+            border: none;
+            border-radius: 6px;
+            font-size: 1rem;
+            font-weight: bold;
+            cursor: pointer;
+            transition: background 0.2s ease, transform 0.1s ease;
+        }
+        .btn-mp4 {
+            background-color: #ff0000;
+            color: white;
+        }
+        .btn-mp4:hover {
+            background-color: #cc0000;
+        }
+        .btn-mp3 {
+            background-color: #28a745;
+            color: white;
+        }
+        .btn-mp3:hover {
+            background-color: #218838;
+        }
+        #status {
+            margin-top: 1rem;
+            font-size: 0.9rem;
+            color: #666;
+        }
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <h1>YouTube Downloader</h1>
+    <form id="download-form">
+        <input type="url" id="video-url" placeholder="Paste YouTube link here..." required>
+        <div class="btn-group">
+            <button type="button" class="btn-mp4" onclick="startDownload('mp4')">Download MP4</button>
+            <button type="button" class="btn-mp3" onclick="startDownload('mp3')">Download MP3</button>
+        </div>
+    </form>
+    <div id="status"></div>
+</div>
+
+<script>
+    function startDownload(format) {
+        const urlInput = document.getElementById('video-url');
+        const url = urlInput.value.trim();
+        const status = document.getElementById('status');
+
+        if (!url) {
+            status.innerText = 'Please enter a valid YouTube URL.';
+            return;
+        }
+
+        status.innerText = `Starting ${format.toUpperCase()} download... Check your browser downloads.`;
+
+        // Direct browser navigation triggers native file save window without buffering full file locally first
+        const downloadUrl = `/download?url=${encodeURIComponent(url)}&format=${format}`;
+        window.location.href = downloadUrl;
+    }
+</script>
+
+</body>
+</html>
