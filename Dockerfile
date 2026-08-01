@@ -1,11 +1,12 @@
 # Use an official Python runtime as a parent image
 FROM python:3.10-slim
 
-# Install system dependencies including curl and unzip (required by Deno installer)
+# Install system dependencies including curl, unzip, AND ffmpeg
 RUN apt-get update && apt-get install -y --no-install-recommends \
     curl \
     unzip \
     ca-certificates \
+    ffmpeg \
     && rm -rf /var/lib/apt/lists/*
 
 # Install Deno for yt-dlp JS challenge solving
