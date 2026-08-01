@@ -35,30 +35,24 @@ def download_media():
     temp_dir = tempfile.mkdtemp()
 
     try:
-        # Base options configured to bypass YouTube cloud IP blocks
+        # Base configuration
         base_ydl_opts = {
             'outtmpl': os.path.join(temp_dir, '%(title)s.%(ext)s'),
             'quiet': True,
             'no_warnings': True,
-            # Trick YouTube into thinking requests originate from the iOS mobile app
-            'extractor_args': {
-                'youtube': {
-                    'player_client': ['ios', 'web']
-                }
-            }
         }
 
-        # 1. Check for Proxy in Render Environment Variables
+        # 1. Inject Webshare Proxy from Render Environment
         proxy_url = os.environ.get('PROXY_URL')
         if proxy_url:
             base_ydl_opts['proxy'] = proxy_url
 
-        # 2. Check for Cookies in Render Environment Variables
+        # 2. Inject YouTube Cookies if configured
         cookie_path = get_cookie_file_path(temp_dir)
         if cookie_path:
             base_ydl_opts['cookiefile'] = cookie_path
 
-        # Set format options
+        # Format configurations
         if download_format == 'mp3':
             ydl_opts = {
                 **base_ydl_opts,
@@ -70,13 +64,13 @@ def download_media():
                 }],
             }
         else:
-            # Flexible single-file stream fallback
+            # Standard universal video selector
             ydl_opts = {
                 **base_ydl_opts,
-                'format': 'b/best',
+                'format': 'bestvideo+bestaudio/best',
             }
 
-        # Extract and download
+        # Download video
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             info = ydl.extract_info(video_url, download=True)
             file_path = ydl.prepare_filename(info)
@@ -89,7 +83,7 @@ def download_media():
 
         download_name = os.path.basename(file_path)
 
-        # Read into memory so we can safely delete disk files immediately
+        # Read into memory so disk can be cleaned immediately
         with open(file_path, 'rb') as f:
             file_bytes = io.BytesIO(f.read())
 
