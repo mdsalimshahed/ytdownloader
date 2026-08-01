@@ -72,13 +72,60 @@
         .btn-mp4:hover { background-color: #cc0000; }
         .btn-mp3 { background-color: #28a745; color: white; }
         .btn-mp3:hover { background-color: #218838; }
-        button:disabled { background-color: #ccc; cursor: not-allowed; }
-        #status {
+        .btn-purge { 
+            background-color: #6c757d; 
+            color: white; 
             margin-top: 1rem;
+            width: 100%;
+        }
+        .btn-purge:hover { background-color: #5a6268; }
+        button:disabled { background-color: #ccc; cursor: not-allowed; }
+
+        /* Progress Bar & Loader Styles */
+        .progress-box {
+            display: none;
+            margin-top: 1.2rem;
+            background: #fafafa;
+            border: 1px solid #e1e4e8;
+            border-radius: 8px;
+            padding: 1rem;
+        }
+        .progress-bar-container {
+            width: 100%;
+            height: 14px;
+            background-color: #e9ecef;
+            border-radius: 7px;
+            overflow: hidden;
+            margin-top: 8px;
+            margin-bottom: 8px;
+        }
+        .progress-bar-fill {
+            height: 100%;
+            width: 0%;
+            background-color: #007bff;
+            transition: width 0.3s ease;
+        }
+        .spinner-row {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+        .spinner {
+            width: 18px;
+            height: 18px;
+            border: 3px solid #ccc;
+            border-top: 3px solid #007bff;
+            border-radius: 50%;
+            animation: spin 0.8s linear infinite;
+        }
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+        #status-text {
             font-size: 0.9rem;
-            color: #555;
-            text-align: center;
-            word-break: break-all;
+            color: #333;
+            font-weight: 500;
         }
         .cookie-status {
             font-size: 0.8rem;
@@ -98,7 +145,7 @@
         <div class="section-title">YouTube URL</div>
         <input type="url" id="video-url" placeholder="Paste YouTube link here..." required>
 
-        <!-- Proxy Settings (Text inputs, visible passwords) -->
+        <!-- Proxy Settings -->
         <div class="section-title">Proxy Settings (Saved in Browser)</div>
         <div class="grid-2">
             <input type="text" id="proxy-ip" placeholder="Proxy IP (e.g. 45.12.34.56)">
@@ -119,13 +166,24 @@
             <button type="button" class="btn-mp4" id="btn-mp4" onclick="startDownload('mp4')">Download MP4</button>
             <button type="button" class="btn-mp3" id="btn-mp3" onclick="startDownload('mp3')">Download MP3</button>
         </div>
+
+        <!-- Purge Button -->
+        <button type="button" class="btn-purge" onclick="purgeAll()">Purge All Settings & Storage</button>
     </form>
 
-    <div id="status"></div>
+    <!-- Progress & Loading Box -->
+    <div id="progress-box" class="progress-box">
+        <div class="spinner-row">
+            <div id="spinner" class="spinner"></div>
+            <div id="status-text">Initializing download...</div>
+        </div>
+        <div class="progress-bar-container">
+            <div id="progress-fill" class="progress-bar-fill"></div>
+        </div>
+    </div>
 </div>
 
 <script>
-    // Elements
     const urlInput = document.getElementById('video-url');
     const proxyIp = document.getElementById('proxy-ip');
     const proxyPort = document.getElementById('proxy-port');
@@ -133,11 +191,14 @@
     const proxyPass = document.getElementById('proxy-pass');
     const cookiesInput = document.getElementById('cookies-file');
     const cookieStatus = document.getElementById('cookie-status');
-    const statusDiv = document.getElementById('status');
+    const progressBox = document.getElementById('progress-box');
+    const progressFill = document.getElementById('progress-fill');
+    const statusText = document.getElementById('status-text');
+    const spinner = document.getElementById('spinner');
     const btnMp4 = document.getElementById('btn-mp4');
     const btnMp3 = document.getElementById('btn-mp3');
 
-    // 1. Load saved Proxy and Cookies from LocalStorage when page opens
+    // 1. Load saved Proxy and Cookies on page open
     window.addEventListener('DOMContentLoaded', () => {
         proxyIp.value = localStorage.getItem('proxy_ip') || '';
         proxyPort.value = localStorage.getItem('proxy_port') || '';
@@ -159,7 +220,7 @@
         });
     });
 
-    // 3. Read uploaded cookies file and save raw text to LocalStorage
+    // 3. Save uploaded cookies file to LocalStorage
     cookiesInput.addEventListener('change', (e) => {
         const file = e.target.files[0];
         if (file) {
@@ -172,30 +233,60 @@
         }
     });
 
-    // 4. Submit form data directly via Fetch API
+    // 4. Purge Function
+    function purgeAll() {
+        localStorage.clear();
+        urlInput.value = '';
+        proxyIp.value = '';
+        proxyPort.value = '';
+        proxyUser.value = '';
+        proxyPass.value = '';
+        cookiesInput.value = '';
+        cookieStatus.innerText = '';
+        progressBox.style.display = 'none';
+        alert('All inputs, proxy details, and stored cookies purged successfully!');
+    }
+
+    // 5. Download with real-time SSE progress updates
     async function startDownload(format) {
         const url = urlInput.value.trim();
         if (!url) {
-            statusDiv.innerText = 'Please enter a valid YouTube URL.';
+            alert('Please enter a valid YouTube URL.');
             return;
         }
 
+        const sessionId = 'session_' + Math.random().toString(36).substring(2, 10);
+
+        // UI Reset
         btnMp4.disabled = true;
         btnMp3.disabled = true;
-        statusDiv.innerText = `Downloading ${format.toUpperCase()}... Please wait.`;
+        progressBox.style.display = 'block';
+        spinner.style.display = 'block';
+        progressFill.style.width = '0%';
+        statusText.innerText = 'Connecting to YouTube server...';
+
+        // Connect to Server-Sent Events progress stream
+        const eventSource = new EventSource(`/progress/${sessionId}`);
+        eventSource.onmessage = (event) => {
+            const data = JSON.parse(event.data);
+            if (data.message) {
+                statusText.innerText = data.message;
+            }
+            if (data.percent) {
+                progressFill.style.width = `${data.percent}%`;
+            }
+        };
 
         try {
             const formData = new FormData();
+            formData.append('session_id', sessionId);
             formData.append('url', url);
             formData.append('format', format);
-
-            // Append proxy info
             formData.append('proxy_ip', proxyIp.value.trim());
             formData.append('proxy_port', proxyPort.value.trim());
             formData.append('proxy_user', proxyUser.value.trim());
             formData.append('proxy_pass', proxyPass.value.trim());
 
-            // If a new file is uploaded, send it. Otherwise, create a file object from saved localStorage text.
             if (cookiesInput.files[0]) {
                 formData.append('cookies_file', cookiesInput.files[0]);
             } else if (localStorage.getItem('cookies_text')) {
@@ -208,19 +299,24 @@
                 body: formData
             });
 
+            eventSource.close();
+
             if (!response.ok) {
                 const errData = await response.json();
                 throw new Error(errData.error || 'Server error occurred');
             }
 
-            // Get filename from Content-Disposition header
+            // Success state
+            progressFill.style.width = '100%';
+            spinner.style.display = 'none';
+            statusText.innerText = '✔ Download complete! Check your browser downloads.';
+
             const disposition = response.headers.get('content-disposition');
             let filename = `download.${format}`;
             if (disposition && disposition.includes('filename=')) {
                 filename = disposition.split('filename=')[1].replace(/"/g, '');
             }
 
-            // Trigger browser save prompt
             const blob = await response.blob();
             const downloadUrl = window.URL.createObjectURL(blob);
             const a = document.createElement('a');
@@ -231,9 +327,11 @@
             a.remove();
             window.URL.revokeObjectURL(downloadUrl);
 
-            statusDiv.innerText = 'Download finished!';
         } catch (err) {
-            statusDiv.innerText = `Error: ${err.message}`;
+            eventSource.close();
+            spinner.style.display = 'none';
+            progressFill.style.width = '0%';
+            statusText.innerText = `❌ Error: ${err.message}`;
         } finally {
             btnMp4.disabled = false;
             btnMp3.disabled = false;
