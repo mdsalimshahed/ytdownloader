@@ -198,6 +198,43 @@
     const btnMp4 = document.getElementById('btn-mp4');
     const btnMp3 = document.getElementById('btn-mp3');
 
+    // Utility: Cleans YouTube URLs by stripping playlist, tracking (si), and extra URL params
+    function sanitizeYouTubeUrl(rawUrl) {
+        if (!rawUrl) return '';
+        try {
+            const url = new URL(rawUrl.trim());
+            
+            // Standard YouTube URLs: youtube.com/watch?v=VIDEO_ID
+            if (url.hostname.includes('youtube.com') && url.searchParams.has('v')) {
+                const videoId = url.searchParams.get('v');
+                return `https://www.youtube.com/watch?v=${videoId}`;
+            } 
+            // Shortened YouTube URLs: youtu.be/VIDEO_ID
+            else if (url.hostname.includes('youtu.be')) {
+                const videoId = url.pathname.replace('/', '');
+                return `https://www.youtube.com/watch?v=${videoId}`;
+            }
+            // Shorts URLs: youtube.com/shorts/VIDEO_ID
+            else if (url.hostname.includes('youtube.com') && url.pathname.includes('/shorts/')) {
+                const videoId = url.pathname.split('/shorts/')[1];
+                return `https://www.youtube.com/watch?v=${videoId}`;
+            }
+        } catch (e) {
+            // Return raw text if not a valid URL structure yet
+            return rawUrl.trim();
+        }
+        return rawUrl.trim();
+    }
+
+    // Auto-strip extra parameters whenever the user pastes or types a link
+    ['input', 'paste', 'change'].forEach(eventType => {
+        urlInput.addEventListener(eventType, () => {
+            setTimeout(() => {
+                urlInput.value = sanitizeYouTubeUrl(urlInput.value);
+            }, 10);
+        });
+    });
+
     // 1. Load saved Proxy and Cookies on page open
     window.addEventListener('DOMContentLoaded', () => {
         proxyIp.value = localStorage.getItem('proxy_ip') || '';
@@ -249,8 +286,10 @@
 
     // 5. Download with real-time SSE progress updates
     async function startDownload(format) {
-        const url = urlInput.value.trim();
-        if (!url) {
+        const cleanUrl = sanitizeYouTubeUrl(urlInput.value);
+        urlInput.value = cleanUrl;
+
+        if (!cleanUrl) {
             alert('Please enter a valid YouTube URL.');
             return;
         }
@@ -280,7 +319,7 @@
         try {
             const formData = new FormData();
             formData.append('session_id', sessionId);
-            formData.append('url', url);
+            formData.append('url', cleanUrl);
             formData.append('format', format);
             formData.append('proxy_ip', proxyIp.value.trim());
             formData.append('proxy_port', proxyPort.value.trim());

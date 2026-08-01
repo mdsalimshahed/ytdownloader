@@ -4,13 +4,34 @@ import json
 import time
 import tempfile
 import threading
+from urllib.parse import urlparse, parse_qs
 from flask import Flask, render_template, request, send_file, jsonify, Response
 import yt_dlp
 
 app = Flask(__name__)
 
-# Store active download progress status by session ID
 progress_store = {}
+
+
+def clean_youtube_url(raw_url):
+    """Strips playlist, tracking IDs (si), and extra URL parameters in Python."""
+    if not raw_url:
+        return ''
+    try:
+        parsed = urlparse(raw_url.strip())
+        if 'youtube.com' in parsed.netloc:
+            qs = parse_qs(parsed.query)
+            if 'v' in qs:
+                return f"https://www.youtube.com/watch?v={qs['v'][0]}"
+            elif '/shorts/' in parsed.path:
+                video_id = parsed.path.split('/shorts/')[1].split('/')[0]
+                return f"https://www.youtube.com/watch?v={video_id}"
+        elif 'youtu.be' in parsed.netloc:
+            video_id = parsed.path.strip('/')
+            return f"https://www.youtube.com/watch?v={video_id}"
+    except Exception:
+        pass
+    return raw_url.strip()
 
 
 def get_progress_hook(session_id):
@@ -58,7 +79,6 @@ def index():
 
 @app.route('/progress/<session_id>')
 def progress_stream(session_id):
-    """Streams real-time progress events to the frontend via SSE."""
     def event_stream():
         while True:
             data = progress_store.get(session_id, {
@@ -78,8 +98,11 @@ def progress_stream(session_id):
 @app.route('/download', methods=['POST'])
 def download_media():
     session_id = request.form.get('session_id')
-    video_url = request.form.get('url')
+    raw_url = request.form.get('url')
     download_format = request.form.get('format', 'mp4')
+
+    # Sanitize URL on backend
+    video_url = clean_youtube_url(raw_url)
 
     proxy_ip = request.form.get('proxy_ip', '').strip()
     proxy_port = request.form.get('proxy_port', '').strip()
@@ -91,7 +114,6 @@ def download_media():
     if not video_url:
         return jsonify({'error': 'No URL provided'}), 400
 
-    # Initialize progress for session
     progress_store[session_id] = {
         'status': 'starting',
         'percent': 5.0,
@@ -104,6 +126,7 @@ def download_media():
                 'outtmpl': os.path.join(temp_dir, '%(title)s.%(ext)s'),
                 'quiet': False,
                 'no_warnings': False,
+                'noplaylist': True,  # Strictly force single video downloads
                 'progress_hooks': [get_progress_hook(session_id)],
             }
 
@@ -168,7 +191,6 @@ def download_media():
             progress_store[session_id] = {'status': 'error', 'message': str(e)}
             return jsonify({'error': str(e)}), 500
         finally:
-            # Clean up session progress after delay
             def cleanup_session():
                 time.sleep(5)
                 progress_store.pop(session_id, None)
