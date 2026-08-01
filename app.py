@@ -35,17 +35,30 @@ def download_media():
     temp_dir = tempfile.mkdtemp()
 
     try:
+        # Base options configured to bypass YouTube cloud IP blocks
         base_ydl_opts = {
             'outtmpl': os.path.join(temp_dir, '%(title)s.%(ext)s'),
             'quiet': True,
             'no_warnings': True,
+            # Trick YouTube into thinking requests originate from the iOS mobile app
+            'extractor_args': {
+                'youtube': {
+                    'player_client': ['ios', 'web']
+                }
+            }
         }
 
-        # Dynamically load cookies if configured
+        # 1. Check for Proxy in Render Environment Variables
+        proxy_url = os.environ.get('PROXY_URL')
+        if proxy_url:
+            base_ydl_opts['proxy'] = proxy_url
+
+        # 2. Check for Cookies in Render Environment Variables
         cookie_path = get_cookie_file_path(temp_dir)
         if cookie_path:
             base_ydl_opts['cookiefile'] = cookie_path
 
+        # Set format options
         if download_format == 'mp3':
             ydl_opts = {
                 **base_ydl_opts,
@@ -57,17 +70,17 @@ def download_media():
                 }],
             }
         else:
-            # Flexible format matching: picks best available single-file stream
+            # Flexible single-file stream fallback
             ydl_opts = {
                 **base_ydl_opts,
                 'format': 'b/best',
             }
 
+        # Extract and download
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             info = ydl.extract_info(video_url, download=True)
             file_path = ydl.prepare_filename(info)
 
-            # If yt-dlp converted or adjusted the extension (e.g. mp3)
             if download_format == 'mp3':
                 file_path = os.path.splitext(file_path)[0] + '.mp3'
 
@@ -76,6 +89,7 @@ def download_media():
 
         download_name = os.path.basename(file_path)
 
+        # Read into memory so we can safely delete disk files immediately
         with open(file_path, 'rb') as f:
             file_bytes = io.BytesIO(f.read())
 
@@ -92,3 +106,8 @@ def download_media():
         if os.path.exists(temp_dir):
             shutil.rmtree(temp_dir, ignore_errors=True)
         return jsonify({'error': str(e)}), 500
+
+
+if __name__ == '__main__':
+    port = int(os.environ.get('PORT', 5000))
+    app.run(host='0.0.0.0', port=port)
