@@ -11,8 +11,10 @@
             display: flex;
             justify-content: center;
             align-items: center;
-            height: 100vh;
+            min-height: 100vh;
             margin: 0;
+            padding: 1rem;
+            box-sizing: border-box;
         }
         .container {
             background: white;
@@ -20,26 +22,41 @@
             border-radius: 12px;
             box-shadow: 0 4px 12px rgba(0,0,0,0.1);
             width: 100%;
-            max-width: 480px;
-            text-align: center;
+            max-width: 520px;
         }
         h1 {
             font-size: 1.5rem;
             margin-bottom: 1.5rem;
             color: #333;
+            text-align: center;
         }
-        input[type="url"] {
+        .section-title {
+            font-size: 0.9rem;
+            font-weight: bold;
+            color: #555;
+            margin-top: 1rem;
+            margin-bottom: 0.5rem;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+        input[type="text"], input[type="url"], input[type="file"] {
             width: 100%;
-            padding: 12px;
+            padding: 10px;
             border: 1px solid #ccc;
             border-radius: 6px;
             box-sizing: border-box;
-            font-size: 1rem;
-            margin-bottom: 1.2rem;
+            font-size: 0.95rem;
+            margin-bottom: 0.8rem;
+        }
+        .grid-2 {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 10px;
         }
         .btn-group {
             display: flex;
             gap: 10px;
+            margin-top: 1rem;
         }
         button {
             flex: 1;
@@ -49,26 +66,25 @@
             font-size: 1rem;
             font-weight: bold;
             cursor: pointer;
-            transition: background 0.2s ease, transform 0.1s ease;
+            transition: background 0.2s ease;
         }
-        .btn-mp4 {
-            background-color: #ff0000;
-            color: white;
-        }
-        .btn-mp4:hover {
-            background-color: #cc0000;
-        }
-        .btn-mp3 {
-            background-color: #28a745;
-            color: white;
-        }
-        .btn-mp3:hover {
-            background-color: #218838;
-        }
+        .btn-mp4 { background-color: #ff0000; color: white; }
+        .btn-mp4:hover { background-color: #cc0000; }
+        .btn-mp3 { background-color: #28a745; color: white; }
+        .btn-mp3:hover { background-color: #218838; }
+        button:disabled { background-color: #ccc; cursor: not-allowed; }
         #status {
             margin-top: 1rem;
             font-size: 0.9rem;
-            color: #666;
+            color: #555;
+            text-align: center;
+            word-break: break-all;
+        }
+        .cookie-status {
+            font-size: 0.8rem;
+            color: #28a745;
+            margin-top: -0.5rem;
+            margin-bottom: 0.8rem;
         }
     </style>
 </head>
@@ -76,32 +92,152 @@
 
 <div class="container">
     <h1>YouTube Downloader</h1>
+    
     <form id="download-form">
+        <!-- Video URL -->
+        <div class="section-title">YouTube URL</div>
         <input type="url" id="video-url" placeholder="Paste YouTube link here..." required>
+
+        <!-- Proxy Settings (Text inputs, visible passwords) -->
+        <div class="section-title">Proxy Settings (Saved in Browser)</div>
+        <div class="grid-2">
+            <input type="text" id="proxy-ip" placeholder="Proxy IP (e.g. 45.12.34.56)">
+            <input type="text" id="proxy-port" placeholder="Port (e.g. 8080)">
+        </div>
+        <div class="grid-2">
+            <input type="text" id="proxy-user" placeholder="Username (optional)">
+            <input type="text" id="proxy-pass" placeholder="Password (optional)">
+        </div>
+
+        <!-- Cookies Upload -->
+        <div class="section-title">Cookies File (Saved in Browser)</div>
+        <input type="file" id="cookies-file" accept=".txt">
+        <div id="cookie-status" class="cookie-status"></div>
+
+        <!-- Action Buttons -->
         <div class="btn-group">
-            <button type="button" class="btn-mp4" onclick="startDownload('mp4')">Download MP4</button>
-            <button type="button" class="btn-mp3" onclick="startDownload('mp3')">Download MP3</button>
+            <button type="button" class="btn-mp4" id="btn-mp4" onclick="startDownload('mp4')">Download MP4</button>
+            <button type="button" class="btn-mp3" id="btn-mp3" onclick="startDownload('mp3')">Download MP3</button>
         </div>
     </form>
+
     <div id="status"></div>
 </div>
 
 <script>
-    function startDownload(format) {
-        const urlInput = document.getElementById('video-url');
-        const url = urlInput.value.trim();
-        const status = document.getElementById('status');
+    // Elements
+    const urlInput = document.getElementById('video-url');
+    const proxyIp = document.getElementById('proxy-ip');
+    const proxyPort = document.getElementById('proxy-port');
+    const proxyUser = document.getElementById('proxy-user');
+    const proxyPass = document.getElementById('proxy-pass');
+    const cookiesInput = document.getElementById('cookies-file');
+    const cookieStatus = document.getElementById('cookie-status');
+    const statusDiv = document.getElementById('status');
+    const btnMp4 = document.getElementById('btn-mp4');
+    const btnMp3 = document.getElementById('btn-mp3');
 
+    // 1. Load saved Proxy and Cookies from LocalStorage when page opens
+    window.addEventListener('DOMContentLoaded', () => {
+        proxyIp.value = localStorage.getItem('proxy_ip') || '';
+        proxyPort.value = localStorage.getItem('proxy_port') || '';
+        proxyUser.value = localStorage.getItem('proxy_user') || '';
+        proxyPass.value = localStorage.getItem('proxy_pass') || '';
+
+        if (localStorage.getItem('cookies_text')) {
+            cookieStatus.innerText = '✔ Saved cookies.txt loaded from browser memory.';
+        }
+    });
+
+    // 2. Auto-save Proxy details on typing
+    [proxyIp, proxyPort, proxyUser, proxyPass].forEach(input => {
+        input.addEventListener('input', () => {
+            localStorage.setItem('proxy_ip', proxyIp.value);
+            localStorage.setItem('proxy_port', proxyPort.value);
+            localStorage.setItem('proxy_user', proxyUser.value);
+            localStorage.setItem('proxy_pass', proxyPass.value);
+        });
+    });
+
+    // 3. Read uploaded cookies file and save raw text to LocalStorage
+    cookiesInput.addEventListener('change', (e) => {
+        const file = e.target.files[0];
+        if (file) {
+            const reader = new FileReader();
+            reader.onload = function(evt) {
+                localStorage.setItem('cookies_text', evt.target.result);
+                cookieStatus.innerText = '✔ New cookies.txt saved to browser memory!';
+            };
+            reader.readAsText(file);
+        }
+    });
+
+    // 4. Submit form data directly via Fetch API
+    async function startDownload(format) {
+        const url = urlInput.value.trim();
         if (!url) {
-            status.innerText = 'Please enter a valid YouTube URL.';
+            statusDiv.innerText = 'Please enter a valid YouTube URL.';
             return;
         }
 
-        status.innerText = `Starting ${format.toUpperCase()} download... Check your browser downloads.`;
+        btnMp4.disabled = true;
+        btnMp3.disabled = true;
+        statusDiv.innerText = `Downloading ${format.toUpperCase()}... Please wait.`;
 
-        // Direct browser navigation triggers native file save window without buffering full file locally first
-        const downloadUrl = `/download?url=${encodeURIComponent(url)}&format=${format}`;
-        window.location.href = downloadUrl;
+        try {
+            const formData = new FormData();
+            formData.append('url', url);
+            formData.append('format', format);
+
+            // Append proxy info
+            formData.append('proxy_ip', proxyIp.value.trim());
+            formData.append('proxy_port', proxyPort.value.trim());
+            formData.append('proxy_user', proxyUser.value.trim());
+            formData.append('proxy_pass', proxyPass.value.trim());
+
+            // If a new file is uploaded, send it. Otherwise, create a file object from saved localStorage text.
+            if (cookiesInput.files[0]) {
+                formData.append('cookies_file', cookiesInput.files[0]);
+            } else if (localStorage.getItem('cookies_text')) {
+                const blob = new Blob([localStorage.getItem('cookies_text')], { type: 'text/plain' });
+                formData.append('cookies_file', blob, 'cookies.txt');
+            }
+
+            const response = await fetch('/download', {
+                method: 'POST',
+                body: formData
+            });
+
+            if (!response.ok) {
+                const errData = await response.json();
+                throw new Error(errData.error || 'Server error occurred');
+            }
+
+            // Get filename from Content-Disposition header
+            const disposition = response.headers.get('content-disposition');
+            let filename = `download.${format}`;
+            if (disposition && disposition.includes('filename=')) {
+                filename = disposition.split('filename=')[1].replace(/"/g, '');
+            }
+
+            // Trigger browser save prompt
+            const blob = await response.blob();
+            const downloadUrl = window.URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = downloadUrl;
+            a.download = filename;
+            document.body.appendChild(a);
+            a.click();
+            a.remove();
+            window.URL.revokeObjectURL(downloadUrl);
+
+            statusDiv.innerText = 'Download finished!';
+        } catch (err) {
+            statusDiv.innerText = `Error: ${err.message}`;
+        } finally {
+            btnMp4.disabled = false;
+            btnMp3.disabled = false;
+        }
     }
 </script>
 
