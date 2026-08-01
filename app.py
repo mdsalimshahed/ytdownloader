@@ -2,11 +2,21 @@ import os
 import io
 import shutil
 import tempfile
-import urllib.parse
 from flask import Flask, render_template, request, send_file, jsonify
 import yt_dlp
 
 app = Flask(__name__)
+
+
+def get_cookie_file_path(temp_dir):
+    """Checks if cookies exist in Environment Variables and writes them to a temporary file."""
+    cookies_content = os.environ.get('YOUTUBE_COOKIES')
+    if cookies_content:
+        cookie_path = os.path.join(temp_dir, 'cookies.txt')
+        with open(cookie_path, 'w', encoding='utf-8') as f:
+            f.write(cookies_content)
+        return cookie_path
+    return None
 
 
 @app.route('/')
@@ -25,14 +35,21 @@ def download_media():
     temp_dir = tempfile.mkdtemp()
 
     try:
+        base_ydl_opts = {
+            'outtmpl': os.path.join(temp_dir, '%(title)s.%(ext)s'),
+            'quiet': True,
+            'no_warnings': True,
+        }
+
+        # Dynamically load cookies if configured on Render
+        cookie_path = get_cookie_file_path(temp_dir)
+        if cookie_path:
+            base_ydl_opts['cookiefile'] = cookie_path
+
         if download_format == 'mp3':
-            file_ext = 'mp3'
-            mime_type = 'audio/mpeg'
             ydl_opts = {
+                **base_ydl_opts,
                 'format': 'bestaudio/best',
-                'outtmpl': os.path.join(temp_dir, '%(title)s.%(ext)s'),
-                'quiet': True,
-                'no_warnings': True,
                 'postprocessors': [{
                     'key': 'FFmpegExtractAudio',
                     'preferredcodec': 'mp3',
@@ -40,13 +57,9 @@ def download_media():
                 }],
             }
         else:
-            file_ext = 'mp4'
-            mime_type = 'video/mp4'
             ydl_opts = {
+                **base_ydl_opts,
                 'format': 'best[ext=mp4]/bestvideo[ext=mp4]+bestaudio[ext=m4a]/best',
-                'outtmpl': os.path.join(temp_dir, '%(title)s.%(ext)s'),
-                'quiet': True,
-                'no_warnings': True,
             }
 
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
@@ -61,15 +74,15 @@ def download_media():
 
         download_name = os.path.basename(file_path)
 
-        # Read into RAM so we can safely clear the temp directory immediately
         with open(file_path, 'rb') as f:
             file_bytes = io.BytesIO(f.read())
 
+        # Cleanup temporary files (including generated cookie file)
         shutil.rmtree(temp_dir, ignore_errors=True)
 
         return send_file(
             file_bytes,
-            mimetype=mime_type,
+            mimetype='audio/mpeg' if download_format == 'mp3' else 'video/mp4',
             as_attachment=True,
             download_name=download_name
         )
@@ -81,6 +94,5 @@ def download_media():
 
 
 if __name__ == '__main__':
-    # Binds dynamically to PORT set by cloud providers or defaults to 5000
     port = int(os.environ.get('PORT', 5000))
     app.run(host='0.0.0.0', port=port)
