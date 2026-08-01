@@ -41,7 +41,7 @@ def download_media():
             'no_warnings': True,
         }
 
-        # Dynamically load cookies if configured on Render
+        # Dynamically load cookies if configured
         cookie_path = get_cookie_file_path(temp_dir)
         if cookie_path:
             base_ydl_opts['cookiefile'] = cookie_path
@@ -57,15 +57,17 @@ def download_media():
                 }],
             }
         else:
+            # Flexible format matching: picks best available single-file stream
             ydl_opts = {
                 **base_ydl_opts,
-                'format': 'best[ext=mp4]/bestvideo[ext=mp4]+bestaudio[ext=m4a]/best',
+                'format': 'b/best',
             }
 
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             info = ydl.extract_info(video_url, download=True)
             file_path = ydl.prepare_filename(info)
 
+            # If yt-dlp converted or adjusted the extension (e.g. mp3)
             if download_format == 'mp3':
                 file_path = os.path.splitext(file_path)[0] + '.mp3'
 
@@ -77,7 +79,6 @@ def download_media():
         with open(file_path, 'rb') as f:
             file_bytes = io.BytesIO(f.read())
 
-        # Cleanup temporary files (including generated cookie file)
         shutil.rmtree(temp_dir, ignore_errors=True)
 
         return send_file(
@@ -91,8 +92,3 @@ def download_media():
         if os.path.exists(temp_dir):
             shutil.rmtree(temp_dir, ignore_errors=True)
         return jsonify({'error': str(e)}), 500
-
-
-if __name__ == '__main__':
-    port = int(os.environ.get('PORT', 5000))
-    app.run(host='0.0.0.0', port=port)
