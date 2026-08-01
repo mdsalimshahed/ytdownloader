@@ -25,4 +25,4 @@ COPY . .
 
 # Expose port and run gunicorn with a 120-second timeout
 EXPOSE 5000
-CMD ["gunicorn", "--bind", "0.0.0.0:5000", "--timeout", "120", "app:app"]
+CMD ["gunicorn", "--bind", "0.0.0.0:5000", "--timeout", "10", "app:app"]
