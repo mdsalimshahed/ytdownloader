@@ -9,7 +9,6 @@ app = Flask(__name__)
 
 
 def get_cookie_file_path(temp_dir):
-    """Checks if cookies exist in Environment Variables and writes them to a temporary file."""
     cookies_content = os.environ.get('YOUTUBE_COOKIES')
     if cookies_content:
         cookie_path = os.path.join(temp_dir, 'cookies.txt')
@@ -35,24 +34,23 @@ def download_media():
     temp_dir = tempfile.mkdtemp()
 
     try:
-        # Base configuration
         base_ydl_opts = {
             'outtmpl': os.path.join(temp_dir, '%(title)s.%(ext)s'),
-            'quiet': True,
-            'no_warnings': True,
+            # Turned OFF quiet mode to capture exact diagnostics in Render logs
+            'quiet': False,
+            'no_warnings': False,
         }
 
-        # 1. Inject Webshare Proxy from Render Environment
+        # Inject Webshare Proxy if set in Render
         proxy_url = os.environ.get('PROXY_URL')
         if proxy_url:
             base_ydl_opts['proxy'] = proxy_url
 
-        # 2. Inject YouTube Cookies if configured
+        # Inject YouTube Cookies if set in Render
         cookie_path = get_cookie_file_path(temp_dir)
         if cookie_path:
             base_ydl_opts['cookiefile'] = cookie_path
 
-        # Format configurations
         if download_format == 'mp3':
             ydl_opts = {
                 **base_ydl_opts,
@@ -64,13 +62,11 @@ def download_media():
                 }],
             }
         else:
-            # Standard universal video selector
             ydl_opts = {
                 **base_ydl_opts,
                 'format': 'bestvideo+bestaudio/best',
             }
 
-        # Download video
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             info = ydl.extract_info(video_url, download=True)
             file_path = ydl.prepare_filename(info)
@@ -83,7 +79,6 @@ def download_media():
 
         download_name = os.path.basename(file_path)
 
-        # Read into memory so disk can be cleaned immediately
         with open(file_path, 'rb') as f:
             file_bytes = io.BytesIO(f.read())
 
