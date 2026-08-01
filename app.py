@@ -17,12 +17,11 @@ def index():
 @app.route('/download', methods=['GET'])
 def download_media():
     video_url = request.args.get('url')
-    download_format = request.args.get('format', 'mp4')  # 'mp4' or 'mp3'
+    download_format = request.args.get('format', 'mp4')
 
     if not video_url:
         return jsonify({'error': 'No URL provided'}), 400
 
-    # Create temporary directory
     temp_dir = tempfile.mkdtemp()
 
     try:
@@ -50,7 +49,6 @@ def download_media():
                 'no_warnings': True,
             }
 
-        # Download file to temp directory
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             info = ydl.extract_info(video_url, download=True)
             file_path = ydl.prepare_filename(info)
@@ -59,18 +57,16 @@ def download_media():
                 file_path = os.path.splitext(file_path)[0] + '.mp3'
 
         if not os.path.exists(file_path):
-            return jsonify({'error': 'Download failed'}), 500
+            return jsonify({'error': 'Download failed on server'}), 500
 
         download_name = os.path.basename(file_path)
 
-        # Read the file into RAM and immediately close/delete the file on disk
+        # Read into RAM so we can safely clear the temp directory immediately
         with open(file_path, 'rb') as f:
             file_bytes = io.BytesIO(f.read())
 
-        # Cleanup disk files before sending the response to release the Windows lock
         shutil.rmtree(temp_dir, ignore_errors=True)
 
-        # Serve the in-memory buffer to the client
         return send_file(
             file_bytes,
             mimetype=mime_type,
@@ -79,11 +75,12 @@ def download_media():
         )
 
     except Exception as e:
-        # Emergency cleanup on failure
         if os.path.exists(temp_dir):
             shutil.rmtree(temp_dir, ignore_errors=True)
         return jsonify({'error': str(e)}), 500
 
 
 if __name__ == '__main__':
-    app.run(debug=True, port=5000)
+    # Binds dynamically to PORT set by cloud providers or defaults to 5000
+    port = int(os.environ.get('PORT', 5000))
+    app.run(host='0.0.0.0', port=port)
