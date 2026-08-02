@@ -39,7 +39,7 @@
             text-transform: uppercase;
             letter-spacing: 0.5px;
         }
-        input[type="text"], input[type="url"], input[type="file"] {
+        input[type="text"], input[type="url"], input[type="file"], textarea {
             width: 100%;
             padding: 10px;
             border: 1px solid #ccc;
@@ -47,11 +47,17 @@
             box-sizing: border-box;
             font-size: 0.95rem;
             margin-bottom: 0.8rem;
+            font-family: inherit;
         }
-        .grid-2 {
-            display: grid;
-            grid-template-columns: 1fr 1fr;
-            gap: 10px;
+        textarea {
+            resize: vertical;
+            min-height: 70px;
+        }
+        .sub-text {
+            font-size: 0.8rem;
+            color: #6c757d;
+            margin-top: -0.5rem;
+            margin-bottom: 0.8rem;
         }
         .btn-group {
             display: flex;
@@ -80,7 +86,7 @@
         }
         .btn-purge:hover { background-color: #5a6268; }
         button:disabled { background-color: #ccc; cursor: not-allowed; }
-
+        
         /* Progress Bar & Loader Styles */
         .progress-box {
             display: none;
@@ -146,15 +152,9 @@
         <input type="url" id="video-url" placeholder="Paste YouTube link here..." required>
 
         <!-- Proxy Settings -->
-        <div class="section-title">Proxy Settings (Saved in Browser)</div>
-        <div class="grid-2">
-            <input type="text" id="proxy-ip" placeholder="Proxy IP (e.g. 45.12.34.56)">
-            <input type="text" id="proxy-port" placeholder="Port (e.g. 8080)">
-        </div>
-        <div class="grid-2">
-            <input type="text" id="proxy-user" placeholder="Username (optional)">
-            <input type="text" id="proxy-pass" placeholder="Password (optional)">
-        </div>
+        <div class="section-title">Webshare / Proxy Command (Saved in Browser)</div>
+        <textarea id="proxy-input" placeholder="Paste Webshare curl response or proxy string here...&#10;e.g., curl -x http://user:pass@p.webshare.io:8080 or user:pass@ip:port"></textarea>
+        <div class="sub-text">Copy from Webshare.io or paste any standard proxy format.</div>
 
         <!-- Cookies Upload -->
         <div class="section-title">Cookies File (Saved in Browser)</div>
@@ -185,10 +185,7 @@
 
 <script>
     const urlInput = document.getElementById('video-url');
-    const proxyIp = document.getElementById('proxy-ip');
-    const proxyPort = document.getElementById('proxy-port');
-    const proxyUser = document.getElementById('proxy-user');
-    const proxyPass = document.getElementById('proxy-pass');
+    const proxyInput = document.getElementById('proxy-input');
     const cookiesInput = document.getElementById('cookies-file');
     const cookieStatus = document.getElementById('cookie-status');
     const progressBox = document.getElementById('progress-box');
@@ -237,24 +234,15 @@
 
     // 1. Load saved Proxy and Cookies on page open
     window.addEventListener('DOMContentLoaded', () => {
-        proxyIp.value = localStorage.getItem('proxy_ip') || '';
-        proxyPort.value = localStorage.getItem('proxy_port') || '';
-        proxyUser.value = localStorage.getItem('proxy_user') || '';
-        proxyPass.value = localStorage.getItem('proxy_pass') || '';
-
+        proxyInput.value = localStorage.getItem('proxy_input') || '';
         if (localStorage.getItem('cookies_text')) {
-            cookieStatus.innerText = '✔ Saved cookies.txt loaded from browser memory.';
+            cookieStatus.innerText = 'Saved cookies.txt loaded from browser memory.';
         }
     });
 
     // 2. Auto-save Proxy details on typing
-    [proxyIp, proxyPort, proxyUser, proxyPass].forEach(input => {
-        input.addEventListener('input', () => {
-            localStorage.setItem('proxy_ip', proxyIp.value);
-            localStorage.setItem('proxy_port', proxyPort.value);
-            localStorage.setItem('proxy_user', proxyUser.value);
-            localStorage.setItem('proxy_pass', proxyPass.value);
-        });
+    proxyInput.addEventListener('input', () => {
+        localStorage.setItem('proxy_input', proxyInput.value);
     });
 
     // 3. Save uploaded cookies file to LocalStorage
@@ -263,8 +251,8 @@
         if (file) {
             const reader = new FileReader();
             reader.onload = function(evt) {
-                localStorage.setItem('cookies_text', evt.target.result);
-                cookieStatus.innerText = '✔ New cookies.txt saved to browser memory!';
+                localStorage.setItem('cookies_text', evt.result);
+                cookieStatus.innerText = 'New cookies.txt saved to browser memory!';
             };
             reader.readAsText(file);
         }
@@ -274,10 +262,7 @@
     function purgeAll() {
         localStorage.clear();
         urlInput.value = '';
-        proxyIp.value = '';
-        proxyPort.value = '';
-        proxyUser.value = '';
-        proxyPass.value = '';
+        proxyInput.value = '';
         cookiesInput.value = '';
         cookieStatus.innerText = '';
         progressBox.style.display = 'none';
@@ -288,7 +273,6 @@
     async function startDownload(format) {
         const cleanUrl = sanitizeYouTubeUrl(urlInput.value);
         urlInput.value = cleanUrl;
-
         if (!cleanUrl) {
             alert('Please enter a valid YouTube URL.');
             return;
@@ -321,10 +305,7 @@
             formData.append('session_id', sessionId);
             formData.append('url', cleanUrl);
             formData.append('format', format);
-            formData.append('proxy_ip', proxyIp.value.trim());
-            formData.append('proxy_port', proxyPort.value.trim());
-            formData.append('proxy_user', proxyUser.value.trim());
-            formData.append('proxy_pass', proxyPass.value.trim());
+            formData.append('proxy_input', proxyInput.value.trim());
 
             if (cookiesInput.files[0]) {
                 formData.append('cookies_file', cookiesInput.files[0]);
@@ -348,7 +329,7 @@
             // Success state
             progressFill.style.width = '100%';
             spinner.style.display = 'none';
-            statusText.innerText = '✔ Download complete! Check your browser downloads.';
+            statusText.innerText = 'Download complete! Check your browser downloads.';
 
             const disposition = response.headers.get('content-disposition');
             let filename = `download.${format}`;
@@ -370,13 +351,12 @@
             eventSource.close();
             spinner.style.display = 'none';
             progressFill.style.width = '0%';
-            statusText.innerText = `❌ Error: ${err.message}`;
+            statusText.innerText = `Error: ${err.message}`;
         } finally {
             btnMp4.disabled = false;
             btnMp3.disabled = false;
         }
     }
 </script>
-
 </body>
 </html>
