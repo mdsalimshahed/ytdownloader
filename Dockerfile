@@ -1,5 +1,5 @@
-# Use an official Python runtime as a parent image
-FROM python:3.10-slim
+# Updated base image from python:3.10-slim to python:3.12-slim to resolve Render deprecation warnings
+FROM python:3.12-slim
 
 # Install system dependencies including curl, unzip, and ffmpeg
 RUN apt-get update && apt-get install -y --no-install-recommends \

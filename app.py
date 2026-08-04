@@ -9,9 +9,13 @@ from urllib.parse import urlparse, parse_qs
 from flask import Flask, render_template, request, send_file, jsonify, Response
 import yt_dlp
 
-app = Flask(__name__)
-progress_store = {}
+# Import the isolated Deezer blueprint
+from deezer_routes import deezer_bp
 
+app = Flask(__name__)
+app.register_blueprint(deezer_bp)
+
+progress_store = {}
 
 def clean_youtube_url(raw_url):
     """Strips playlist, tracking IDs (si), and extra URL parameters in Python."""
@@ -33,7 +37,6 @@ def clean_youtube_url(raw_url):
         pass
     return raw_url.strip()
 
-
 def parse_proxy_input(raw_input: str) -> str:
     """
     Extracts IP, Port, Username, and Password from pasted curl commands,
@@ -41,41 +44,28 @@ def parse_proxy_input(raw_input: str) -> str:
     """
     if not raw_input:
         return None
-
     raw_input = raw_input.strip()
-
-    # 1. Match full http/https URL from pasted text or curl command
     if "http://" in raw_input or "https://" in raw_input:
         match = re.search(r'https?://[^\s\'"]+', raw_input)
         if match:
             return match.group(0)
-
-    # 2. Match pattern: username:password@ip:port
     match = re.search(r'([^:\s\'"]+):([^:\s\'"]+)@(\d{1,3}(?:\.\d{1,3}){3}):(\d+)', raw_input)
     if match:
         user, pwd, ip, port = match.groups()
         return f"http://{user}:{pwd}@{ip}:{port}"
-
-    # 3. Match pattern: ip:port:username:password
     match = re.search(r'(\d{1,3}(?:\.\d{1,3}){3}):(\d+):([^:\s\'"]+):([^:\s\'"]+)', raw_input)
     if match:
         ip, port, user, pwd = match.groups()
         return f"http://{user}:{pwd}@{ip}:{port}"
-
-    # 4. Match pattern: username:password:ip:port
     match = re.search(r'([^:\s\'"]+):([^:\s\'"]+):(\d{1,3}(?:\.\d{1,3}){3}):(\d+)', raw_input)
     if match:
         user, pwd, ip, port = match.groups()
         return f"http://{user}:{pwd}@{ip}:{port}"
-
-    # 5. Basic fallback: ip:port
     match = re.search(r'(\d{1,3}(?:\.\d{1,3}){3}):(\d+)', raw_input)
     if match:
         ip, port = match.groups()
         return f"http://{ip}:{port}"
-
     raise ValueError("Could not parse a valid proxy from the provided text.")
-
 
 def get_progress_hook(session_id):
     """yt-dlp progress hook to capture real-time percentage and download speed."""
@@ -85,10 +75,7 @@ def get_progress_hook(session_id):
         if d['status'] == 'downloading':
             total_bytes = d.get('total_bytes') or d.get('total_bytes_estimate', 0)
             downloaded_bytes = d.get('downloaded_bytes', 0)
-            if total_bytes > 0:
-                percent = round((downloaded_bytes / total_bytes) * 100, 1)
-            else:
-                percent = 0
+            percent = round((downloaded_bytes / total_bytes) * 100, 1) if total_bytes > 0 else 0
             speed = d.get('_speed_str', 'N/A')
             eta = d.get('_eta_str', 'N/A')
             progress_store[session_id] = {
@@ -108,11 +95,9 @@ def get_progress_hook(session_id):
             }
     return hook
 
-
 @app.route('/')
 def index():
     return render_template('index.html')
-
 
 @app.route('/progress/<session_id>')
 def progress_stream(session_id):
@@ -124,12 +109,10 @@ def progress_stream(session_id):
                 'message': 'Initializing request...'
             })
             yield f"data: {json.dumps(data)}\n\n"
-            
             if data.get('status') == 'completed' or data.get('status') == 'error':
                 break
             time.sleep(0.5)
     return Response(event_stream(), mimetype='text/event-stream')
-
 
 @app.route('/download', methods=['POST'])
 def download_media():
@@ -137,12 +120,10 @@ def download_media():
     raw_url = request.form.get('url')
     download_format = request.form.get('format', 'mp4')
     
-    # Sanitize URL on backend
     video_url = clean_youtube_url(raw_url)
-    
     raw_proxy_input = request.form.get('proxy_input', '').strip()
     cookies_file = request.files.get('cookies_file')
-
+    
     if not video_url:
         return jsonify({'error': 'No URL provided'}), 400
 
@@ -152,7 +133,6 @@ def download_media():
         'message': 'Connecting to YouTube and solving JS challenge...'
     }
 
-    # Extract proxy URL from user input if provided
     proxy_url = None
     if raw_proxy_input:
         try:
@@ -167,13 +147,11 @@ def download_media():
                 'outtmpl': os.path.join(temp_dir, '%(title)s.%(ext)s'),
                 'quiet': False,
                 'no_warnings': False,
-                'noplaylist': True,  # Strictly force single video downloads
+                'noplaylist': True,
                 'progress_hooks': [get_progress_hook(session_id)],
             }
-
             if proxy_url:
                 base_ydl_opts['proxy'] = proxy_url
-
             if cookies_file and cookies_file.filename != '':
                 cookie_path = os.path.join(temp_dir, 'cookies.txt')
                 cookies_file.save(cookie_path)
@@ -206,7 +184,6 @@ def download_media():
                 return jsonify({'error': 'Download failed on server'}), 500
 
             download_name = os.path.basename(file_path)
-
             progress_store[session_id] = {
                 'status': 'completed',
                 'percent': 100.0,
@@ -222,7 +199,6 @@ def download_media():
                 as_attachment=True,
                 download_name=download_name
             )
-
         except Exception as e:
             progress_store[session_id] = {'status': 'error', 'message': str(e)}
             return jsonify({'error': str(e)}), 500
@@ -231,7 +207,6 @@ def download_media():
                 time.sleep(5)
                 progress_store.pop(session_id, None)
             threading.Thread(target=cleanup_session).start()
-
 
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 5000))

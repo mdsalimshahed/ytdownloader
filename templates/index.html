@@ -3,175 +3,46 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>YouTube Downloader</title>
-    <style>
-        body {
-            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-            background-color: #f4f6f8;
-            display: flex;
-            justify-content: center;
-            align-items: center;
-            min-height: 100vh;
-            margin: 0;
-            padding: 1rem;
-            box-sizing: border-box;
-        }
-        .container {
-            background: white;
-            padding: 2rem;
-            border-radius: 12px;
-            box-shadow: 0 4px 12px rgba(0,0,0,0.1);
-            width: 100%;
-            max-width: 520px;
-        }
-        h1 {
-            font-size: 1.5rem;
-            margin-bottom: 1.5rem;
-            color: #333;
-            text-align: center;
-        }
-        .section-title {
-            font-size: 0.9rem;
-            font-weight: bold;
-            color: #555;
-            margin-top: 1rem;
-            margin-bottom: 0.5rem;
-            text-transform: uppercase;
-            letter-spacing: 0.5px;
-        }
-        input[type="text"], input[type="url"], input[type="file"], textarea {
-            width: 100%;
-            padding: 10px;
-            border: 1px solid #ccc;
-            border-radius: 6px;
-            box-sizing: border-box;
-            font-size: 0.95rem;
-            margin-bottom: 0.8rem;
-            font-family: inherit;
-        }
-        textarea {
-            resize: vertical;
-            min-height: 70px;
-        }
-        .sub-text {
-            font-size: 0.8rem;
-            color: #6c757d;
-            margin-top: -0.5rem;
-            margin-bottom: 0.8rem;
-        }
-        .btn-group {
-            display: flex;
-            gap: 10px;
-            margin-top: 1rem;
-        }
-        button {
-            flex: 1;
-            padding: 12px;
-            border: none;
-            border-radius: 6px;
-            font-size: 1rem;
-            font-weight: bold;
-            cursor: pointer;
-            transition: background 0.2s ease;
-        }
-        .btn-mp4 { background-color: #ff0000; color: white; }
-        .btn-mp4:hover { background-color: #cc0000; }
-        .btn-mp3 { background-color: #28a745; color: white; }
-        .btn-mp3:hover { background-color: #218838; }
-        .btn-purge { 
-            background-color: #6c757d; 
-            color: white; 
-            margin-top: 1rem;
-            width: 100%;
-        }
-        .btn-purge:hover { background-color: #5a6268; }
-        button:disabled { background-color: #ccc; cursor: not-allowed; }
-        
-        /* Progress Bar & Loader Styles */
-        .progress-box {
-            display: none;
-            margin-top: 1.2rem;
-            background: #fafafa;
-            border: 1px solid #e1e4e8;
-            border-radius: 8px;
-            padding: 1rem;
-        }
-        .progress-bar-container {
-            width: 100%;
-            height: 14px;
-            background-color: #e9ecef;
-            border-radius: 7px;
-            overflow: hidden;
-            margin-top: 8px;
-            margin-bottom: 8px;
-        }
-        .progress-bar-fill {
-            height: 100%;
-            width: 0%;
-            background-color: #007bff;
-            transition: width 0.3s ease;
-        }
-        .spinner-row {
-            display: flex;
-            align-items: center;
-            gap: 10px;
-        }
-        .spinner {
-            width: 18px;
-            height: 18px;
-            border: 3px solid #ccc;
-            border-top: 3px solid #007bff;
-            border-radius: 50%;
-            animation: spin 0.8s linear infinite;
-        }
-        @keyframes spin {
-            0% { transform: rotate(0deg); }
-            100% { transform: rotate(360deg); }
-        }
-        #status-text {
-            font-size: 0.9rem;
-            color: #333;
-            font-weight: 500;
-        }
-        .cookie-status {
-            font-size: 0.8rem;
-            color: #28a745;
-            margin-top: -0.5rem;
-            margin-bottom: 0.8rem;
-        }
-    </style>
+    <title>Media Studio Downloader</title>
+    <!-- External Stylesheet -->
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
 </head>
 <body>
-
 <div class="container">
-    <h1>YouTube Downloader</h1>
-    
-    <form id="download-form">
-        <!-- Video URL -->
-        <div class="section-title">YouTube URL</div>
-        <input type="url" id="video-url" placeholder="Paste YouTube link here..." required>
+    <h1>Media Studio</h1>
 
-        <!-- Proxy Settings -->
-        <div class="section-title">Webshare / Proxy Command (Saved in Browser)</div>
-        <textarea id="proxy-input" placeholder="Paste Webshare curl response or proxy string here...&#10;e.g., curl -x http://user:pass@p.webshare.io:8080 or user:pass@ip:port"></textarea>
-        <div class="sub-text">Copy from Webshare.io or paste any standard proxy format.</div>
+    <!-- Segmented Navigation Tabs -->
+    <div class="tab-nav">
+        <button class="tab-btn active" onclick="switchTab('youtube')">YouTube Downloader</button>
+        <button class="tab-btn" onclick="switchTab('deezer')">Deezer Search & Stream</button>
+    </div>
 
-        <!-- Cookies Upload -->
-        <div class="section-title">Cookies File (Saved in Browser)</div>
-        <input type="file" id="cookies-file" accept=".txt">
-        <div id="cookie-status" class="cookie-status"></div>
+    <!-- YouTube Tab -->
+    <div id="youtube-tab-content">
+        <form id="download-form">
+            <div class="section-title">YouTube URL</div>
+            <input type="url" id="video-url" placeholder="Paste YouTube link here..." required>
+            
+            <div class="section-title">Webshare / Proxy Command (Saved in Browser)</div>
+            <textarea id="proxy-input" placeholder="Paste Webshare curl response or proxy string here...&#10;e.g., curl -x http://user:pass@p.webshare.io:8080 or user:pass@ip:port"></textarea>
+            <div class="sub-text">Copy from Webshare.io or paste any standard proxy format.</div>
 
-        <!-- Action Buttons -->
-        <div class="btn-group">
-            <button type="button" class="btn-mp4" id="btn-mp4" onclick="startDownload('mp4')">Download MP4</button>
-            <button type="button" class="btn-mp3" id="btn-mp3" onclick="startDownload('mp3')">Download MP3</button>
-        </div>
+            <div class="section-title">Cookies File (Saved in Browser)</div>
+            <input type="file" id="cookies-file" accept=".txt">
+            <div id="cookie-status" class="cookie-status"></div>
 
-        <!-- Purge Button -->
-        <button type="button" class="btn-purge" onclick="purgeAll()">Purge All Settings & Storage</button>
-    </form>
+            <div class="btn-group">
+                <button type="button" class="btn-mp4" id="btn-mp4" onclick="startDownload('mp4')">Download MP4</button>
+                <button type="button" class="btn-mp3" id="btn-mp3" onclick="startDownload('mp3')">Download MP3</button>
+            </div>
+            <button type="button" class="btn-purge" onclick="purgeAll()">Purge All Settings & Storage</button>
+        </form>
+    </div>
 
-    <!-- Progress & Loading Box -->
+    <!-- Deezer Sub-Template Tab -->
+    {% include 'deezer_tab.html' %}
+
+    <!-- Shared Progress & Loading Box -->
     <div id="progress-box" class="progress-box">
         <div class="spinner-row">
             <div id="spinner" class="spinner"></div>
@@ -184,6 +55,20 @@
 </div>
 
 <script>
+    function switchTab(tab) {
+        document.querySelectorAll('.tab-btn').forEach(btn => btn.classList.remove('active'));
+        if (tab === 'youtube') {
+            document.querySelectorAll('.tab-btn')[0].classList.add('active');
+            document.getElementById('youtube-tab-content').style.display = 'block';
+            document.getElementById('deezer-tab-content').style.display = 'none';
+        } else {
+            document.querySelectorAll('.tab-btn')[1].classList.add('active');
+            document.getElementById('youtube-tab-content').style.display = 'none';
+            document.getElementById('deezer-tab-content').style.display = 'block';
+        }
+        document.getElementById('progress-box').style.display = 'none';
+    }
+
     const urlInput = document.getElementById('video-url');
     const proxyInput = document.getElementById('proxy-input');
     const cookiesInput = document.getElementById('cookies-file');
@@ -195,44 +80,29 @@
     const btnMp4 = document.getElementById('btn-mp4');
     const btnMp3 = document.getElementById('btn-mp3');
 
-    // Utility: Cleans YouTube URLs by stripping playlist, tracking (si), and extra URL params
     function sanitizeYouTubeUrl(rawUrl) {
         if (!rawUrl) return '';
         try {
             const url = new URL(rawUrl.trim());
-            
-            // Standard YouTube URLs: youtube.com/watch?v=VIDEO_ID
             if (url.hostname.includes('youtube.com') && url.searchParams.has('v')) {
-                const videoId = url.searchParams.get('v');
-                return `https://www.youtube.com/watch?v=${videoId}`;
-            } 
-            // Shortened YouTube URLs: youtu.be/VIDEO_ID
-            else if (url.hostname.includes('youtu.be')) {
-                const videoId = url.pathname.replace('/', '');
-                return `https://www.youtube.com/watch?v=${videoId}`;
-            }
-            // Shorts URLs: youtube.com/shorts/VIDEO_ID
-            else if (url.hostname.includes('youtube.com') && url.pathname.includes('/shorts/')) {
-                const videoId = url.pathname.split('/shorts/')[1];
-                return `https://www.youtube.com/watch?v=${videoId}`;
+                return `https://www.youtube.com/watch?v=${url.searchParams.get('v')}`;
+            } else if (url.hostname.includes('youtu.be')) {
+                return `https://www.youtube.com/watch?v=${url.pathname.replace('/', '')}`;
+            } else if (url.hostname.includes('youtube.com') && url.pathname.includes('/shorts/')) {
+                return `https://www.youtube.com/watch?v=${url.pathname.split('/shorts/')[1]}`;
             }
         } catch (e) {
-            // Return raw text if not a valid URL structure yet
             return rawUrl.trim();
         }
         return rawUrl.trim();
     }
 
-    // Auto-strip extra parameters whenever the user pastes or types a link
     ['input', 'paste', 'change'].forEach(eventType => {
         urlInput.addEventListener(eventType, () => {
-            setTimeout(() => {
-                urlInput.value = sanitizeYouTubeUrl(urlInput.value);
-            }, 10);
+            setTimeout(() => { urlInput.value = sanitizeYouTubeUrl(urlInput.value); }, 10);
         });
     });
 
-    // 1. Load saved Proxy and Cookies on page open
     window.addEventListener('DOMContentLoaded', () => {
         proxyInput.value = localStorage.getItem('proxy_input') || '';
         if (localStorage.getItem('cookies_text')) {
@@ -240,12 +110,10 @@
         }
     });
 
-    // 2. Auto-save Proxy details on typing
     proxyInput.addEventListener('input', () => {
         localStorage.setItem('proxy_input', proxyInput.value);
     });
 
-    // 3. Save uploaded cookies file to LocalStorage
     cookiesInput.addEventListener('change', (e) => {
         const file = e.target.files[0];
         if (file) {
@@ -258,7 +126,6 @@
         }
     });
 
-    // 4. Purge Function
     function purgeAll() {
         localStorage.clear();
         urlInput.value = '';
@@ -269,7 +136,6 @@
         alert('All inputs, proxy details, and stored cookies purged successfully!');
     }
 
-    // 5. Download with real-time SSE progress updates
     async function startDownload(format) {
         const cleanUrl = sanitizeYouTubeUrl(urlInput.value);
         urlInput.value = cleanUrl;
@@ -277,10 +143,8 @@
             alert('Please enter a valid YouTube URL.');
             return;
         }
-
         const sessionId = 'session_' + Math.random().toString(36).substring(2, 10);
 
-        // UI Reset
         btnMp4.disabled = true;
         btnMp3.disabled = true;
         progressBox.style.display = 'block';
@@ -288,16 +152,11 @@
         progressFill.style.width = '0%';
         statusText.innerText = 'Connecting to YouTube server...';
 
-        // Connect to Server-Sent Events progress stream
         const eventSource = new EventSource(`/progress/${sessionId}`);
         eventSource.onmessage = (event) => {
             const data = JSON.parse(event.data);
-            if (data.message) {
-                statusText.innerText = data.message;
-            }
-            if (data.percent) {
-                progressFill.style.width = `${data.percent}%`;
-            }
+            if (data.message) statusText.innerText = data.message;
+            if (data.percent) progressFill.style.width = `${data.percent}%`;
         };
 
         try {
@@ -306,7 +165,6 @@
             formData.append('url', cleanUrl);
             formData.append('format', format);
             formData.append('proxy_input', proxyInput.value.trim());
-
             if (cookiesInput.files[0]) {
                 formData.append('cookies_file', cookiesInput.files[0]);
             } else if (localStorage.getItem('cookies_text')) {
@@ -314,19 +172,14 @@
                 formData.append('cookies_file', blob, 'cookies.txt');
             }
 
-            const response = await fetch('/download', {
-                method: 'POST',
-                body: formData
-            });
-
+            const response = await fetch('/download', { method: 'POST', body: formData });
             eventSource.close();
-
+            
             if (!response.ok) {
                 const errData = await response.json();
                 throw new Error(errData.error || 'Server error occurred');
             }
 
-            // Success state
             progressFill.style.width = '100%';
             spinner.style.display = 'none';
             statusText.innerText = 'Download complete! Check your browser downloads.';
@@ -346,7 +199,6 @@
             a.click();
             a.remove();
             window.URL.revokeObjectURL(downloadUrl);
-
         } catch (err) {
             eventSource.close();
             spinner.style.display = 'none';

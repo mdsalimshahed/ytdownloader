@@ -1,0 +1,289 @@
+<div id="deezer-tab-content" style="display: none;">
+    <form id="deezer-download-form" onsubmit="event.preventDefault();">
+        <!-- Intelligent Search & Link Input -->
+        <div class="section-title">Search Deezer or Paste Track Link</div>
+        <input type="text" id="deezer-search-input" placeholder="Search track name/artist OR paste https://www.deezer.com/track/..." autocomplete="off">
+        
+        <!-- Live Search Results (Up to 30 tracks) -->
+        <div id="deezer-results-container" class="results-grid"></div>
+
+        <!-- Deezer ARL Token -->
+        <div class="section-title" style="margin-top: 1.2rem;">Deezer ARL Token (Saved in Browser)</div>
+        <textarea id="deezer-arl" placeholder="Paste your Deezer ARL cookie token here...&#10;Required to stream/download music from Deezer on hosted servers."></textarea>
+        <div class="sub-text">How to get ARL: Open Deezer web -> Inspect Element -> Application/Storage -> Cookies -> Copy value of 'arl'.</div>
+
+        <!-- Audio Quality -->
+        <div class="section-title">Audio Quality</div>
+        <select id="deezer-quality" class="form-select">
+            <option value="1" selected>MP3 - 128 kbps (Standard / Free Tier Default)</option>
+            <option value="3">MP3 - 320 kbps (High Quality - Premium Account Required)</option>
+            <option value="9">FLAC - Lossless Audio (HiFi Account Required)</option>
+        </select>
+
+        <!-- Audio Player Widget & Web Audio EQ Canvas -->
+        <div id="audio-player-container" class="player-card" style="display: none;">
+            <div id="now-playing-title" class="now-playing-title">Now Playing</div>
+            <canvas id="eq-canvas" width="480" height="70" class="eq-canvas-styled"></canvas>
+            <audio id="deezer-audio-player" controls crossorigin="anonymous" style="width: 100%; margin-top: 10px;"></audio>
+        </div>
+
+        <button type="button" class="btn-purge" onclick="purgeDeezerSettings()">Purge Deezer Settings</button>
+    </form>
+</div>
+
+<script>
+    const searchInput = document.getElementById('deezer-search-input');
+    const resultsContainer = document.getElementById('deezer-results-container');
+    const dzArlInput = document.getElementById('deezer-arl');
+    const audioPlayerContainer = document.getElementById('audio-player-container');
+    const audioPlayer = document.getElementById('deezer-audio-player');
+    const nowPlayingTitle = document.getElementById('now-playing-title');
+    const canvas = document.getElementById('eq-canvas');
+    const canvasCtx = canvas.getContext('2d');
+
+    let audioCtx = null;
+    let analyser = null;
+    let sourceNode = null;
+    let animationFrameId = null;
+    let searchDebounceTimer = null;
+
+    // Persistence
+    window.addEventListener('DOMContentLoaded', () => {
+        dzArlInput.value = localStorage.getItem('deezer_arl_token') || '';
+    });
+
+    dzArlInput.addEventListener('input', () => {
+        localStorage.setItem('deezer_arl_token', dzArlInput.value.trim());
+    });
+
+    // Intelligent URL Cleaning Function (Strips `sid` and all tracking query params)
+    function cleanDeezerUrl(rawInput) {
+        if (!rawInput) return '';
+        try {
+            if (rawInput.includes('deezer.com')) {
+                const url = new URL(rawInput.trim());
+                // Strips tracking parameters like ?sid=... or ?utm_...
+                return `${url.origin}${url.pathname}`;
+            }
+        } catch (e) {
+            return rawInput.trim();
+        }
+        return rawInput.trim();
+    }
+
+    // Intelligent Input Event Listener
+    ['input', 'paste'].forEach(eventType => {
+        searchInput.addEventListener(eventType, () => {
+            clearTimeout(searchDebounceTimer);
+            
+            setTimeout(() => {
+                let val = searchInput.value.trim();
+                
+                // If a Deezer URL is detected, sanitize and update input field instantly
+                if (val.includes('deezer.com')) {
+                    const cleanedUrl = cleanDeezerUrl(val);
+                    searchInput.value = cleanedUrl;
+                    fetchDeezerSearchResults(cleanedUrl);
+                    return;
+                }
+
+                if (!val) {
+                    resultsContainer.innerHTML = '';
+                    return;
+                }
+
+                // Debounce normal text queries (300ms)
+                searchDebounceTimer = setTimeout(() => {
+                    fetchDeezerSearchResults(val);
+                }, 300);
+            }, 10);
+        });
+    });
+
+    async function fetchDeezerSearchResults(query) {
+        try {
+            resultsContainer.innerHTML = '<div class="sub-text" style="text-align: center; margin: 10px 0;">Searching...</div>';
+            const resp = await fetch(`/search-deezer?q=${encodeURIComponent(query)}`);
+            const data = await resp.json();
+            renderSearchResults(data.results || []);
+        } catch (err) {
+            console.error('Search error:', err);
+            resultsContainer.innerHTML = '<div class="sub-text" style="text-align: center; color: red;">Search request failed.</div>';
+        }
+    }
+
+    function renderSearchResults(results) {
+        resultsContainer.innerHTML = '';
+        if (results.length === 0) {
+            resultsContainer.innerHTML = '<div class="sub-text" style="text-align: center; margin: 10px 0;">No tracks found.</div>';
+            return;
+        }
+
+        results.forEach(track => {
+            const card = document.createElement('div');
+            card.className = 'track-card';
+
+            const durationMinSec = `${Math.floor(track.duration / 60)}:${(track.duration % 60).toString().padStart(2, '0')}`;
+            const safeTitle = (track.artist + " - " + track.title).replace(/['"]/g, '');
+
+            card.innerHTML = `
+                <img src="${track.cover}" class="track-cover" alt="Cover">
+                <div class="track-info">
+                    <div class="track-title">${track.title}</div>
+                    <div class="track-artist">${track.artist} • ${durationMinSec}</div>
+                </div>
+                <div class="track-actions">
+                    <button class="btn-action-small btn-play" onclick="handleTrackAction('${track.link}', 'stream', '${safeTitle}')">Play</button>
+                    <button class="btn-action-small btn-dl" onclick="handleTrackAction('${track.link}', 'download', '')">Download</button>
+                </div>
+            `;
+            resultsContainer.appendChild(card);
+        });
+    }
+
+    function initWebAudioEQ() {
+        if (!audioCtx) {
+            audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+            analyser = audioCtx.createAnalyser();
+            analyser.fftSize = 64;
+
+            sourceNode = audioCtx.createMediaElementSource(audioPlayer);
+            sourceNode.connect(analyser);
+            analyser.connect(audioCtx.destination);
+        }
+        if (audioCtx.state === 'suspended') {
+            audioCtx.resume();
+        }
+    }
+
+    function drawEQ() {
+        animationFrameId = requestAnimationFrame(drawEQ);
+
+        const bufferLength = analyser.frequencyBinCount;
+        const dataArray = new Uint8Array(bufferLength);
+        analyser.getByteFrequencyData(dataArray);
+
+        canvasCtx.clearRect(0, 0, canvas.width, canvas.height);
+
+        const barWidth = (canvas.width / bufferLength) * 2.2;
+        let barHeight;
+        let x = 0;
+
+        for (let i = 0; i < bufferLength; i++) {
+            barHeight = (dataArray[i] / 255) * canvas.height;
+
+            const gradient = canvasCtx.createLinearGradient(0, canvas.height, 0, 0);
+            gradient.addColorStop(0, '#007bff');
+            gradient.addColorStop(0.7, '#a238ff');
+            gradient.addColorStop(1, '#ff0055');
+
+            canvasCtx.fillStyle = gradient;
+            canvasCtx.fillRect(x, canvas.height - barHeight, barWidth - 2, barHeight);
+
+            x += barWidth;
+        }
+    }
+
+    audioPlayer.addEventListener('play', () => {
+        initWebAudioEQ();
+        if (!animationFrameId) {
+            drawEQ();
+        }
+    });
+
+    audioPlayer.addEventListener('pause', () => {
+        if (animationFrameId) {
+            cancelAnimationFrame(animationFrameId);
+            animationFrameId = null;
+        }
+    });
+
+    function purgeDeezerSettings() {
+        localStorage.removeItem('deezer_arl_token');
+        searchInput.value = '';
+        resultsContainer.innerHTML = '';
+        dzArlInput.value = '';
+        audioPlayerContainer.style.display = 'none';
+        if (animationFrameId) cancelAnimationFrame(animationFrameId);
+        audioPlayer.pause();
+        audioPlayer.src = '';
+        alert('Deezer settings purged successfully!');
+    }
+
+    async function handleTrackAction(trackUrl, actionType, trackLabel) {
+        const arlToken = dzArlInput.value.trim();
+        const quality = document.getElementById('deezer-quality').value;
+
+        if (!arlToken) {
+            alert('Deezer ARL token is required to stream or download music.');
+            return;
+        }
+
+        const sessionId = 'dz_session_' + Math.random().toString(36).substring(2, 10);
+        
+        progressBox.style.display = 'block';
+        spinner.style.display = 'block';
+        progressFill.style.width = '0%';
+        statusText.innerText = 'Connecting to Deezer API...';
+
+        const eventSource = new EventSource(`/deezer-progress/${sessionId}`);
+        eventSource.onmessage = (event) => {
+            const data = JSON.parse(event.data);
+            if (data.message) statusText.innerText = data.message;
+            if (data.percent) progressFill.style.width = `${data.percent}%`;
+        };
+
+        try {
+            const formData = new FormData();
+            formData.append('session_id', sessionId);
+            formData.append('url', trackUrl);
+            formData.append('arl_token', arlToken);
+            formData.append('quality', quality);
+            formData.append('action', actionType);
+
+            const response = await fetch('/download-deezer', {
+                method: 'POST',
+                body: formData
+            });
+
+            eventSource.close();
+            if (!response.ok) {
+                const errData = await response.json();
+                throw new Error(errData.error || 'Server error occurred');
+            }
+
+            progressFill.style.width = '100%';
+            spinner.style.display = 'none';
+
+            const disposition = response.headers.get('content-disposition');
+            let filename = trackLabel || 'deezer_track.mp3';
+            if (disposition && disposition.includes('filename=')) {
+                filename = disposition.split('filename=')[1].replace(/"/g, '');
+            }
+
+            const blob = await response.blob();
+            const mediaUrl = window.URL.createObjectURL(blob);
+
+            if (actionType === 'stream') {
+                statusText.innerText = 'Playing stream...';
+                audioPlayerContainer.style.display = 'block';
+                nowPlayingTitle.innerText = `Now Playing: ${filename}`;
+                audioPlayer.src = mediaUrl;
+                audioPlayer.play();
+            } else {
+                statusText.innerText = 'Download complete! Check your browser downloads.';
+                const a = document.createElement('a');
+                a.href = mediaUrl;
+                a.download = filename;
+                document.body.appendChild(a);
+                a.click();
+                a.remove();
+            }
+        } catch (err) {
+            eventSource.close();
+            spinner.style.display = 'none';
+            progressFill.style.width = '0%';
+            statusText.innerText = `Error: ${err.message}`;
+        }
+    }
+</script>
