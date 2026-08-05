@@ -16,6 +16,16 @@ from deezer import Deezer
 deezer_bp = Blueprint('deezer', __name__)
 progress_store_deezer = {}
 
+# --- ADD THIS NEW BLOCK RIGHT HERE ---
+@deezer_bp.after_request
+def add_cors_headers(response):
+    """Automatically allow Cross-Origin requests from your React frontend"""
+    response.headers['Access-Control-Allow-Origin'] = '*'
+    response.headers['Access-Control-Allow-Headers'] = 'Content-Type,Authorization'
+    response.headers['Access-Control-Allow-Methods'] = 'GET,PUT,POST,DELETE,OPTIONS'
+    return response
+# -------------------------------------
+
 def get_deezer_listener(session_id):
     """Custom listener for deemix download progress."""
     class DeezerListener:
