@@ -16,16 +16,6 @@ from deezer import Deezer
 deezer_bp = Blueprint('deezer', __name__)
 progress_store_deezer = {}
 
-# --- ADD THIS NEW BLOCK RIGHT HERE ---
-@deezer_bp.after_request
-def add_cors_headers(response):
-    """Automatically allow Cross-Origin requests from your React frontend"""
-    response.headers['Access-Control-Allow-Origin'] = '*'
-    response.headers['Access-Control-Allow-Headers'] = 'Content-Type,Authorization'
-    response.headers['Access-Control-Allow-Methods'] = 'GET,PUT,POST,DELETE,OPTIONS'
-    return response
-# -------------------------------------
-
 def get_deezer_listener(session_id):
     """Custom listener for deemix download progress."""
     class DeezerListener:
@@ -61,7 +51,7 @@ def search_deezer():
     }
 
     try:
-        # Case 1: Direct Deezer Track URL pasted into the search box
+        # Direct Deezer Track URL pasted into the search box
         if 'deezer.com' in raw_query and '/track/' in raw_query:
             parsed = urlparse(raw_query)
             track_id = parsed.path.split('/track/')[1].split('/')[0]
@@ -81,7 +71,7 @@ def search_deezer():
                         'duration': item.get('duration', 0)
                     }]})
 
-        # Case 2: Standard text query search
+        # Standard text search
         encoded_query = quote(raw_query)
         url = f"https://api.deezer.com/search?q={encoded_query}&limit=30&strict=off"
         
@@ -103,6 +93,53 @@ def search_deezer():
     except Exception as e:
         return jsonify({'error': str(e)}), 500
     return jsonify({'results': []})
+
+@deezer_bp.route('/track-info-deezer/<track_id>', methods=['GET'])
+def get_track_info_deezer(track_id):
+    """Fetches track metadata, album genres, and lyrics directly from Deezer API."""
+    try:
+        headers = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+            'Accept-Language': 'en-US,en;q=0.9'
+        }
+        
+        # 1. Fetch Track details
+        track_url = f"https://api.deezer.com/track/{track_id}"
+        resp_track = requests.get(track_url, headers=headers, timeout=10)
+        if resp_track.status_code != 200:
+            return jsonify({'error': 'Failed to retrieve track metadata'}), resp_track.status_code
+
+        track_data = resp_track.json()
+
+        # 2. Fetch Genre information from Album endpoint if present
+        genres = []
+        if 'album' in track_data and 'id' in track_data['album']:
+            album_id = track_data['album']['id']
+            album_url = f"https://api.deezer.com/album/{album_id}"
+            resp_album = requests.get(album_url, headers=headers, timeout=10)
+            if resp_album.status_code == 200:
+                album_data = resp_album.json()
+                if 'genres' in album_data and 'data' in album_data['genres']:
+                    genres = [g.get('name') for g in album_data['genres']['data'] if g.get('name')]
+
+        # 3. Fetch Lyrics from Deezer Lyrics API
+        lyrics_text = "No lyrics available for this track."
+        lyrics_url = f"https://api.deezer.com/track/{track_id}/lyrics"
+        resp_lyrics = requests.get(lyrics_url, headers=headers, timeout=10)
+        if resp_lyrics.status_code == 200:
+            lyrics_data = resp_lyrics.json()
+            if 'lyrics' in lyrics_data:
+                lyrics_text = lyrics_data['lyrics']
+            elif 'text' in lyrics_data:
+                lyrics_text = lyrics_data['text']
+
+        track_data['extracted_genres'] = genres if genres else ["Not Specified"]
+        track_data['extracted_lyrics'] = lyrics_text
+
+        return jsonify({'success': True, 'data': track_data})
+
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
 
 @deezer_bp.route('/deezer-progress/<session_id>')
 def deezer_progress_stream(session_id):

@@ -196,12 +196,12 @@ button:disabled { background-color: #ced4da; cursor: not-allowed; }
 
 .track-actions {
     display: flex;
-    gap: 6px;
+    gap: 4px;
 }
 
 .btn-action-small {
-    padding: 6px 10px;
-    font-size: 0.8rem;
+    padding: 6px 9px;
+    font-size: 0.78rem;
     font-weight: 600;
     border: none;
     border-radius: 5px;
@@ -212,6 +212,70 @@ button:disabled { background-color: #ced4da; cursor: not-allowed; }
 .btn-action-small:hover { opacity: 0.85; }
 .btn-play { background-color: #007bff; color: white; }
 .btn-dl { background-color: #a238ff; color: white; }
+.btn-info { background-color: #6c757d; color: white; }
+
+/* Metadata Display Card & Table */
+.metadata-card {
+    margin-top: 1rem;
+    background: #f8f9fa;
+    border: 1px solid #dee2e6;
+    border-radius: 10px;
+    padding: 1rem;
+}
+
+.metadata-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 0.8rem;
+    font-weight: 700;
+    color: #343a40;
+    font-size: 0.95rem;
+}
+
+.btn-close-meta {
+    background: none;
+    border: none;
+    font-size: 1.2rem;
+    cursor: pointer;
+    color: #6c757d;
+    padding: 0 4px;
+}
+
+.metadata-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.82rem;
+}
+
+.metadata-table td {
+    padding: 6px 8px;
+    border-bottom: 1px solid #e9ecef;
+}
+
+.metadata-table td.meta-key {
+    font-weight: 600;
+    color: #495057;
+    width: 35%;
+}
+
+.metadata-table td.meta-val {
+    color: #212529;
+    word-break: break-word;
+}
+
+.lyrics-box {
+    background: #ffffff;
+    border: 1px solid #ced4da;
+    border-radius: 6px;
+    padding: 8px 10px;
+    max-height: 120px;
+    overflow-y: auto;
+    white-space: pre-wrap;
+    font-family: inherit;
+    font-size: 0.8rem;
+    color: #333;
+}
 
 .player-card {
     margin-top: 1.2rem;

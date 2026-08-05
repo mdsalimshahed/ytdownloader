@@ -7,6 +7,17 @@
         <!-- Live Search Results (Up to 30 tracks) -->
         <div id="deezer-results-container" class="results-grid"></div>
 
+        <!-- Track Metadata Information Card -->
+        <div id="deezer-metadata-card" class="metadata-card" style="display: none;">
+            <div class="metadata-header">
+                <span id="meta-track-title">Track Information</span>
+                <button type="button" class="btn-close-meta" onclick="closeMetadataCard()">&times;</button>
+            </div>
+            <table class="metadata-table">
+                <tbody id="metadata-tbody"></tbody>
+            </table>
+        </div>
+
         <!-- Deezer ARL Token -->
         <div class="section-title" style="margin-top: 1.2rem;">Deezer ARL Token (Saved in Browser)</div>
         <textarea id="deezer-arl" placeholder="Paste your Deezer ARL cookie token here...&#10;Required to stream/download music from Deezer on hosted servers."></textarea>
@@ -34,6 +45,9 @@
 <script>
     const searchInput = document.getElementById('deezer-search-input');
     const resultsContainer = document.getElementById('deezer-results-container');
+    const metadataCard = document.getElementById('deezer-metadata-card');
+    const metadataTbody = document.getElementById('metadata-tbody');
+    const metaTrackTitle = document.getElementById('meta-track-title');
     const dzArlInput = document.getElementById('deezer-arl');
     const audioPlayerContainer = document.getElementById('audio-player-container');
     const audioPlayer = document.getElementById('deezer-audio-player');
@@ -56,13 +70,11 @@
         localStorage.setItem('deezer_arl_token', dzArlInput.value.trim());
     });
 
-    // Intelligent URL Cleaning Function (Strips `sid` and all tracking query params)
     function cleanDeezerUrl(rawInput) {
         if (!rawInput) return '';
         try {
             if (rawInput.includes('deezer.com')) {
                 const url = new URL(rawInput.trim());
-                // Strips tracking parameters like ?sid=... or ?utm_...
                 return `${url.origin}${url.pathname}`;
             }
         } catch (e) {
@@ -71,7 +83,6 @@
         return rawInput.trim();
     }
 
-    // Intelligent Input Event Listener
     ['input', 'paste'].forEach(eventType => {
         searchInput.addEventListener(eventType, () => {
             clearTimeout(searchDebounceTimer);
@@ -79,7 +90,6 @@
             setTimeout(() => {
                 let val = searchInput.value.trim();
                 
-                // If a Deezer URL is detected, sanitize and update input field instantly
                 if (val.includes('deezer.com')) {
                     const cleanedUrl = cleanDeezerUrl(val);
                     searchInput.value = cleanedUrl;
@@ -92,7 +102,6 @@
                     return;
                 }
 
-                // Debounce normal text queries (300ms)
                 searchDebounceTimer = setTimeout(() => {
                     fetchDeezerSearchResults(val);
                 }, 300);
@@ -135,10 +144,67 @@
                 <div class="track-actions">
                     <button class="btn-action-small btn-play" onclick="handleTrackAction('${track.link}', 'stream', '${safeTitle}')">Play</button>
                     <button class="btn-action-small btn-dl" onclick="handleTrackAction('${track.link}', 'download', '')">Download</button>
+                    <button class="btn-action-small btn-info" onclick="showTrackMetadata('${track.id}')">Info</button>
                 </div>
             `;
             resultsContainer.appendChild(card);
         });
+    }
+
+    async function showTrackMetadata(trackId) {
+        try {
+            metadataCard.style.display = 'block';
+            metadataTbody.innerHTML = '<tr><td colspan="2" style="text-align:center;">Loading Deezer metadata & lyrics...</td></tr>';
+            
+            const resp = await fetch(`/track-info-deezer/${trackId}`);
+            const json = await resp.json();
+
+            if (!json.success || !json.data) {
+                metadataTbody.innerHTML = '<tr><td colspan="2" style="color:red; text-align:center;">Failed to load metadata.</td></tr>';
+                return;
+            }
+
+            const data = json.data;
+            metaTrackTitle.innerText = `${data.title} - Metadata`;
+            metadataTbody.innerHTML = '';
+
+            const genresDisplay = data.extracted_genres && data.extracted_genres.length > 0 ? data.extracted_genres.join(', ') : 'Not Specified';
+            const lyricsDisplay = data.extracted_lyrics ? `<div class="lyrics-box">${data.extracted_lyrics}</div>` : 'No lyrics available';
+
+            const fieldsToShow = [
+                { key: 'Track ID', val: data.id },
+                { key: 'Genre(s)', val: `<strong>${genresDisplay}</strong>` },
+                { key: 'ISRC Code', val: data.isrc || 'N/A' },
+                { key: 'Title', val: data.title },
+                { key: 'Artist', val: data.artist ? data.artist.name : 'N/A' },
+                { key: 'Album Title', val: data.album ? data.album.title : 'N/A' },
+                { key: 'Release Date', val: data.release_date || (data.album ? data.album.release_date : 'N/A') },
+                { key: 'Duration', val: `${data.duration} seconds` },
+                { key: 'BPM / Tempo', val: data.bpm || 'N/A' },
+                { key: 'Gain', val: data.gain ? `${data.gain} dB` : 'N/A' },
+                { key: 'Deezer Rank', val: data.rank ? data.rank.toLocaleString() : 'N/A' },
+                { key: 'Explicit Lyrics', val: data.explicit_lyrics ? 'Yes ⚠️' : 'No' },
+                { key: 'Lyrics', val: lyricsDisplay },
+                { key: 'Streaming Link', val: `<a href="${data.link}" target="_blank" style="color:#007bff;">Open on Deezer</a>` }
+            ];
+
+            fieldsToShow.forEach(item => {
+                const tr = document.createElement('tr');
+                tr.innerHTML = `
+                    <td class="meta-key">${item.key}</td>
+                    <td class="meta-val">${item.val}</td>
+                `;
+                metadataTbody.appendChild(tr);
+            });
+
+        } catch (err) {
+            console.error('Metadata error:', err);
+            metadataTbody.innerHTML = '<tr><td colspan="2" style="color:red; text-align:center;">Error fetching data.</td></tr>';
+        }
+    }
+
+    function closeMetadataCard() {
+        metadataCard.style.display = 'none';
     }
 
     function initWebAudioEQ() {
@@ -202,6 +268,7 @@
         localStorage.removeItem('deezer_arl_token');
         searchInput.value = '';
         resultsContainer.innerHTML = '';
+        metadataCard.style.display = 'none';
         dzArlInput.value = '';
         audioPlayerContainer.style.display = 'none';
         if (animationFrameId) cancelAnimationFrame(animationFrameId);
