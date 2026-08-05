@@ -1,4 +1,6 @@
 Flask
+Flask-Cors
 yt-dlp[default]
 gunicorn
 deemix
+requests

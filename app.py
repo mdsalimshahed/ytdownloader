@@ -7,12 +7,17 @@ import tempfile
 import threading
 from urllib.parse import urlparse, parse_qs
 from flask import Flask, render_template, request, send_file, jsonify, Response
+from flask_cors import CORS
 import yt_dlp
 
 # Import the isolated Deezer blueprint
 from deezer_routes import deezer_bp
 
 app = Flask(__name__)
+
+# ENABLE CORS: This stops the browser from blocking localhost requests!
+CORS(app, resources={r"/*": {"origins": "*"}})
+
 app.register_blueprint(deezer_bp)
 
 progress_store = {}
@@ -150,8 +155,10 @@ def download_media():
                 'noplaylist': True,
                 'progress_hooks': [get_progress_hook(session_id)],
             }
+
             if proxy_url:
                 base_ydl_opts['proxy'] = proxy_url
+
             if cookies_file and cookies_file.filename != '':
                 cookie_path = os.path.join(temp_dir, 'cookies.txt')
                 cookies_file.save(cookie_path)
@@ -199,6 +206,7 @@ def download_media():
                 as_attachment=True,
                 download_name=download_name
             )
+
         except Exception as e:
             progress_store[session_id] = {'status': 'error', 'message': str(e)}
             return jsonify({'error': str(e)}), 500

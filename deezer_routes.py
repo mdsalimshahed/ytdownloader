@@ -7,14 +7,22 @@ import threading
 from urllib.parse import quote, urlparse
 import requests
 from flask import Blueprint, render_template, request, send_file, jsonify, Response
-
 from deemix import generateDownloadObject
 from deemix.downloader import Downloader
 from deemix.settings import load as load_settings
 from deezer import Deezer
 
 deezer_bp = Blueprint('deezer', __name__)
+
 progress_store_deezer = {}
+
+# --- ADDED: EXPLICIT CORS HOOK FOR DEEZER ROUTES ---
+@deezer_bp.after_request
+def add_cors_headers(response):
+    response.headers['Access-Control-Allow-Origin'] = '*'
+    response.headers['Access-Control-Allow-Headers'] = 'Content-Type,Authorization'
+    response.headers['Access-Control-Allow-Methods'] = 'GET,PUT,POST,DELETE,OPTIONS'
+    return response
 
 def get_deezer_listener(session_id):
     """Custom listener for deemix download progress."""
@@ -43,7 +51,7 @@ def search_deezer():
     raw_query = request.args.get('q', '').strip()
     if not raw_query:
         return jsonify({'results': []})
-    
+        
     headers = {
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
         'Accept-Language': 'en-US,en;q=0.9',
@@ -90,8 +98,10 @@ def search_deezer():
                     'duration': item.get('duration', 0)
                 })
             return jsonify({'results': results})
+
     except Exception as e:
         return jsonify({'error': str(e)}), 500
+
     return jsonify({'results': []})
 
 @deezer_bp.route('/track-info-deezer/<track_id>', methods=['GET'])
@@ -137,7 +147,6 @@ def get_track_info_deezer(track_id):
         track_data['extracted_lyrics'] = lyrics_text
 
         return jsonify({'success': True, 'data': track_data})
-
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
@@ -166,6 +175,7 @@ def download_deezer():
 
     if not track_url:
         return jsonify({'error': 'No Deezer URL provided'}), 400
+
     if not arl_token:
         return jsonify({'error': 'Deezer ARL Token is required for authentication.'}), 400
 
@@ -194,7 +204,6 @@ def download_deezer():
 
             download_info = generateDownloadObject(dz, track_url, int(quality))
             listener = get_deezer_listener(session_id)
-
             downloader = Downloader(dz, download_info, settings, listener)
             downloader.start()
 
@@ -229,12 +238,14 @@ def download_deezer():
                 as_attachment=is_attachment,
                 download_name=download_name
             )
+
             response.headers['Access-Control-Allow-Origin'] = '*'
             return response
 
         except Exception as e:
             progress_store_deezer[session_id] = {'status': 'error', 'message': str(e)}
             return jsonify({'error': str(e)}), 500
+
         finally:
             def cleanup():
                 time.sleep(5)
