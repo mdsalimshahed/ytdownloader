@@ -1,9 +1,12 @@
 import os
 import io
+import re
 import json
 import time
+import shutil
 import tempfile
 import threading
+from datetime import datetime
 from urllib.parse import quote, urlparse
 import requests
 from flask import Blueprint, render_template, request, send_file, jsonify, Response
@@ -13,15 +16,18 @@ from deemix.settings import load as load_settings
 from deezer import Deezer
 
 deezer_bp = Blueprint('deezer', __name__)
-
 progress_store_deezer = {}
 
-# --- ADDED: EXPLICIT CORS HOOK FOR DEEZER ROUTES ---
+# Environment Detection (Render automatically sets RENDER=true)
+IS_LOCAL = os.environ.get('RENDER') is None
+
+# --- EXPLICIT CORS HOOK FOR DEEZER ROUTES ---
 @deezer_bp.after_request
 def add_cors_headers(response):
     response.headers['Access-Control-Allow-Origin'] = '*'
     response.headers['Access-Control-Allow-Headers'] = 'Content-Type,Authorization'
     response.headers['Access-Control-Allow-Methods'] = 'GET,PUT,POST,DELETE,OPTIONS'
+    response.headers['Access-Control-Expose-Headers'] = 'Content-Disposition'
     return response
 
 def get_deezer_listener(session_id):
@@ -57,9 +63,7 @@ def search_deezer():
         'Accept-Language': 'en-US,en;q=0.9',
         'Cache-Control': 'no-cache'
     }
-
     try:
-        # Direct Deezer Track URL pasted into the search box
         if 'deezer.com' in raw_query and '/track/' in raw_query:
             parsed = urlparse(raw_query)
             track_id = parsed.path.split('/track/')[1].split('/')[0]
@@ -79,7 +83,6 @@ def search_deezer():
                         'duration': item.get('duration', 0)
                     }]})
 
-        # Standard text search
         encoded_query = quote(raw_query)
         url = f"https://api.deezer.com/search?q={encoded_query}&limit=30&strict=off"
         
@@ -98,30 +101,23 @@ def search_deezer():
                     'duration': item.get('duration', 0)
                 })
             return jsonify({'results': results})
-
     except Exception as e:
         return jsonify({'error': str(e)}), 500
-
     return jsonify({'results': []})
 
 @deezer_bp.route('/track-info-deezer/<track_id>', methods=['GET'])
 def get_track_info_deezer(track_id):
-    """Fetches track metadata, album genres, and lyrics directly from Deezer API."""
     try:
         headers = {
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
             'Accept-Language': 'en-US,en;q=0.9'
         }
-        
-        # 1. Fetch Track details
         track_url = f"https://api.deezer.com/track/{track_id}"
         resp_track = requests.get(track_url, headers=headers, timeout=10)
         if resp_track.status_code != 200:
             return jsonify({'error': 'Failed to retrieve track metadata'}), resp_track.status_code
-
         track_data = resp_track.json()
 
-        # 2. Fetch Genre information from Album endpoint if present
         genres = []
         if 'album' in track_data and 'id' in track_data['album']:
             album_id = track_data['album']['id']
@@ -132,7 +128,6 @@ def get_track_info_deezer(track_id):
                 if 'genres' in album_data and 'data' in album_data['genres']:
                     genres = [g.get('name') for g in album_data['genres']['data'] if g.get('name')]
 
-        # 3. Fetch Lyrics from Deezer Lyrics API
         lyrics_text = "No lyrics available for this track."
         lyrics_url = f"https://api.deezer.com/track/{track_id}/lyrics"
         resp_lyrics = requests.get(lyrics_url, headers=headers, timeout=10)
@@ -145,7 +140,6 @@ def get_track_info_deezer(track_id):
 
         track_data['extracted_genres'] = genres if genres else ["Not Specified"]
         track_data['extracted_lyrics'] = lyrics_text
-
         return jsonify({'success': True, 'data': track_data})
     except Exception as e:
         return jsonify({'error': str(e)}), 500
@@ -172,12 +166,49 @@ def download_deezer():
     arl_token = request.form.get('arl_token', '').strip()
     quality = request.form.get('quality', '1')
     action = request.form.get('action', 'download')
+    frontend_local_dir = request.form.get('local_dir', '').strip()
+    index_counter_str = request.form.get('index_counter', '').strip()
 
     if not track_url:
         return jsonify({'error': 'No Deezer URL provided'}), 400
-
     if not arl_token:
         return jsonify({'error': 'Deezer ARL Token is required for authentication.'}), 400
+
+    # Prefix using the counter sent from frontend directly (No folder scanning)
+    prefix = f"{{{index_counter_str}}} " if index_counter_str.isdigit() and action != 'stream' else ""
+        
+    track_id = None
+    if 'deezer.com' in track_url and '/track/' in track_url:
+        try:
+            parsed = urlparse(track_url)
+            track_id = parsed.path.split('/track/')[1].split('/')[0]
+        except:
+            pass
+
+    song_name = "Deezer_Track"
+    artist_name = "Unknown_Artist"
+    explicit_tag = ""
+    
+    if track_id:
+        try:
+            h = {
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+                'Accept-Language': 'en-US,en;q=0.9'
+            }
+            t_resp = requests.get(f"https://api.deezer.com/track/{track_id}", headers=h, timeout=5)
+            if t_resp.status_code == 200:
+                t_data = t_resp.json()
+                if 'title' in t_data:
+                    song_name = t_data['title']
+                if 'artist' in t_data and 'name' in t_data['artist']:
+                    artist_name = t_data['artist']['name']
+                if t_data.get('explicit_lyrics'):
+                    explicit_tag = " (Explicit)"
+        except Exception:
+            pass
+
+    song_name = re.sub(r'[\\/*?:"<>|]', "", song_name).strip()
+    artist_name = re.sub(r'[\\/*?:"<>|]', "", artist_name).strip()
 
     progress_store_deezer[session_id] = {
         'status': 'starting',
@@ -217,35 +248,72 @@ def download_deezer():
                 raise Exception("Failed to retrieve audio stream from Deezer. Verify link or ARL token.")
 
             file_path = downloaded_files[0]
-            download_name = os.path.basename(file_path)
+            
+            # --- APPLY OS-LEVEL CHARACTER LIMITS & FORMATTING ---
+            ext = os.path.splitext(file_path)[1].lower()
+            base_name = f"{prefix}{song_name} by {artist_name}{explicit_tag}"
+            
+            if len(base_name) + len(ext) > 250:
+                base_name = f"{prefix}{song_name}{explicit_tag}"
+                if len(base_name) + len(ext) > 250:
+                    allowed_len = 250 - len(prefix) - len(explicit_tag) - len(ext)
+                    base_name = f"{prefix}{song_name[:allowed_len].strip()}{explicit_tag}"
+                    
+            download_name = base_name + ext
 
+            # ==========================================
+            # DIRECTORY CREATION & SAVE (LOCAL ONLY)
+            # ==========================================
+            saved_locally = False
+            date_str = ""
+            
+            if action != 'stream' and IS_LOCAL and frontend_local_dir:
+                try:
+                    date_str = datetime.now().strftime("%d %B %Y").lstrip("0")
+                    final_save_dir = os.path.join(frontend_local_dir, date_str)
+                    os.makedirs(final_save_dir, exist_ok=True)
+                    
+                    server_file_path = os.path.join(final_save_dir, download_name)
+                    shutil.copy2(file_path, server_file_path)
+                    saved_locally = True
+                except Exception as local_err:
+                    print(f"Local save error: {local_err}")
+
+            # If successfully saved to the local folder, RETURN JSON to prevent the browser download popup
+            if saved_locally and action != 'stream':
+                progress_store_deezer[session_id] = {
+                    'status': 'completed',
+                    'percent': 100.0,
+                    'message': f'Saved locally to {date_str} folder!'
+                }
+                return jsonify({
+                    'success': True,
+                    'message': f'File saved directly to: {date_str} folder'
+                })
+
+            # If streaming OR running on Render cloud (where it can't save locally), send the file to the browser
             progress_store_deezer[session_id] = {
                 'status': 'completed',
                 'percent': 100.0,
-                'message': 'Stream ready!' if action == 'stream' else 'Transferring track to your device...'
+                'message': 'Stream ready!' if action == 'stream' else 'Transferring track to browser...'
             }
 
             with open(file_path, 'rb') as f:
                 file_bytes = io.BytesIO(f.read())
 
-            ext = os.path.splitext(download_name)[1].lower()
             mimetype = 'audio/flac' if ext == '.flac' else 'audio/mpeg'
-            is_attachment = (action != 'stream')
-
+            
             response = send_file(
                 file_bytes,
                 mimetype=mimetype,
-                as_attachment=is_attachment,
+                as_attachment=(action != 'stream'),
                 download_name=download_name
             )
-
-            response.headers['Access-Control-Allow-Origin'] = '*'
             return response
 
         except Exception as e:
             progress_store_deezer[session_id] = {'status': 'error', 'message': str(e)}
             return jsonify({'error': str(e)}), 500
-
         finally:
             def cleanup():
                 time.sleep(5)

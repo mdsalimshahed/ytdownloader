@@ -23,6 +23,16 @@
         <textarea id="deezer-arl" placeholder="Paste your Deezer ARL cookie token here...&#10;Required to stream/download music from Deezer on hosted servers."></textarea>
         <div class="sub-text">How to get ARL: Open Deezer web -> Inspect Element -> Application/Storage -> Cookies -> Copy value of 'arl'.</div>
 
+        <!-- Local Save Directory -->
+        <div class="section-title">Local Save Directory (Localhost Only)</div>
+        <input type="text" id="deezer-local-dir" placeholder="Paste absolute path (e.g., C:\Music\Downloads)" autocomplete="off">
+        <div class="sub-text">The date folder will be created inside this path automatically.</div>
+
+        <!-- Auto-Incrementing Index Counter -->
+        <div class="section-title">Index Counter (Current Highest Number)</div>
+        <input type="number" id="deezer-index-counter" placeholder="Enter current highest number (e.g., 2750)" autocomplete="off">
+        <div class="sub-text">The downloaded song will use the NEXT number, and this box will update only upon success.</div>
+
         <!-- Audio Quality -->
         <div class="section-title">Audio Quality</div>
         <select id="deezer-quality" class="form-select">
@@ -49,12 +59,14 @@
     const metadataTbody = document.getElementById('metadata-tbody');
     const metaTrackTitle = document.getElementById('meta-track-title');
     const dzArlInput = document.getElementById('deezer-arl');
+    const localDirInput = document.getElementById('deezer-local-dir');
+    const indexCounterInput = document.getElementById('deezer-index-counter');
     const audioPlayerContainer = document.getElementById('audio-player-container');
     const audioPlayer = document.getElementById('deezer-audio-player');
     const nowPlayingTitle = document.getElementById('now-playing-title');
     const canvas = document.getElementById('eq-canvas');
     const canvasCtx = canvas.getContext('2d');
-
+    
     let audioCtx = null;
     let analyser = null;
     let sourceNode = null;
@@ -64,10 +76,20 @@
     // Persistence
     window.addEventListener('DOMContentLoaded', () => {
         dzArlInput.value = localStorage.getItem('deezer_arl_token') || '';
+        localDirInput.value = localStorage.getItem('deezer_local_dir') || '';
+        indexCounterInput.value = localStorage.getItem('deezer_index_counter') || '';
     });
 
     dzArlInput.addEventListener('input', () => {
         localStorage.setItem('deezer_arl_token', dzArlInput.value.trim());
+    });
+
+    localDirInput.addEventListener('input', () => {
+        localStorage.setItem('deezer_local_dir', localDirInput.value.trim());
+    });
+
+    indexCounterInput.addEventListener('input', () => {
+        localStorage.setItem('deezer_index_counter', indexCounterInput.value.trim());
     });
 
     function cleanDeezerUrl(rawInput) {
@@ -96,12 +118,10 @@
                     fetchDeezerSearchResults(cleanedUrl);
                     return;
                 }
-
                 if (!val) {
                     resultsContainer.innerHTML = '';
                     return;
                 }
-
                 searchDebounceTimer = setTimeout(() => {
                     fetchDeezerSearchResults(val);
                 }, 300);
@@ -127,14 +147,12 @@
             resultsContainer.innerHTML = '<div class="sub-text" style="text-align: center; margin: 10px 0;">No tracks found.</div>';
             return;
         }
-
         results.forEach(track => {
             const card = document.createElement('div');
             card.className = 'track-card';
-
             const durationMinSec = `${Math.floor(track.duration / 60)}:${(track.duration % 60).toString().padStart(2, '0')}`;
             const safeTitle = (track.artist + " - " + track.title).replace(/['"]/g, '');
-
+            
             card.innerHTML = `
                 <img src="${track.cover}" class="track-cover" alt="Cover">
                 <div class="track-info">
@@ -158,19 +176,17 @@
             
             const resp = await fetch(`/track-info-deezer/${trackId}`);
             const json = await resp.json();
-
             if (!json.success || !json.data) {
                 metadataTbody.innerHTML = '<tr><td colspan="2" style="color:red; text-align:center;">Failed to load metadata.</td></tr>';
                 return;
             }
-
             const data = json.data;
             metaTrackTitle.innerText = `${data.title} - Metadata`;
             metadataTbody.innerHTML = '';
-
+            
             const genresDisplay = data.extracted_genres && data.extracted_genres.length > 0 ? data.extracted_genres.join(', ') : 'Not Specified';
             const lyricsDisplay = data.extracted_lyrics ? `<div class="lyrics-box">${data.extracted_lyrics}</div>` : 'No lyrics available';
-
+            
             const fieldsToShow = [
                 { key: 'Track ID', val: data.id },
                 { key: 'Genre(s)', val: `<strong>${genresDisplay}</strong>` },
@@ -183,11 +199,11 @@
                 { key: 'BPM / Tempo', val: data.bpm || 'N/A' },
                 { key: 'Gain', val: data.gain ? `${data.gain} dB` : 'N/A' },
                 { key: 'Deezer Rank', val: data.rank ? data.rank.toLocaleString() : 'N/A' },
-                { key: 'Explicit Lyrics', val: data.explicit_lyrics ? 'Yes ⚠️' : 'No' },
+                { key: 'Explicit Lyrics', val: data.explicit_lyrics ? 'Yes' : 'No' },
                 { key: 'Lyrics', val: lyricsDisplay },
                 { key: 'Streaming Link', val: `<a href="${data.link}" target="_blank" style="color:#007bff;">Open on Deezer</a>` }
             ];
-
+            
             fieldsToShow.forEach(item => {
                 const tr = document.createElement('tr');
                 tr.innerHTML = `
@@ -196,7 +212,6 @@
                 `;
                 metadataTbody.appendChild(tr);
             });
-
         } catch (err) {
             console.error('Metadata error:', err);
             metadataTbody.innerHTML = '<tr><td colspan="2" style="color:red; text-align:center;">Error fetching data.</td></tr>';
@@ -212,7 +227,6 @@
             audioCtx = new (window.AudioContext || window.webkitAudioContext)();
             analyser = audioCtx.createAnalyser();
             analyser.fftSize = 64;
-
             sourceNode = audioCtx.createMediaElementSource(audioPlayer);
             sourceNode.connect(analyser);
             analyser.connect(audioCtx.destination);
@@ -224,28 +238,24 @@
 
     function drawEQ() {
         animationFrameId = requestAnimationFrame(drawEQ);
-
         const bufferLength = analyser.frequencyBinCount;
         const dataArray = new Uint8Array(bufferLength);
         analyser.getByteFrequencyData(dataArray);
-
         canvasCtx.clearRect(0, 0, canvas.width, canvas.height);
-
+        
         const barWidth = (canvas.width / bufferLength) * 2.2;
         let barHeight;
         let x = 0;
-
+        
         for (let i = 0; i < bufferLength; i++) {
             barHeight = (dataArray[i] / 255) * canvas.height;
-
             const gradient = canvasCtx.createLinearGradient(0, canvas.height, 0, 0);
             gradient.addColorStop(0, '#007bff');
             gradient.addColorStop(0.7, '#a238ff');
             gradient.addColorStop(1, '#ff0055');
-
+            
             canvasCtx.fillStyle = gradient;
             canvasCtx.fillRect(x, canvas.height - barHeight, barWidth - 2, barHeight);
-
             x += barWidth;
         }
     }
@@ -266,10 +276,14 @@
 
     function purgeDeezerSettings() {
         localStorage.removeItem('deezer_arl_token');
+        localStorage.removeItem('deezer_local_dir');
+        localStorage.removeItem('deezer_index_counter');
         searchInput.value = '';
         resultsContainer.innerHTML = '';
         metadataCard.style.display = 'none';
         dzArlInput.value = '';
+        localDirInput.value = '';
+        indexCounterInput.value = '';
         audioPlayerContainer.style.display = 'none';
         if (animationFrameId) cancelAnimationFrame(animationFrameId);
         audioPlayer.pause();
@@ -279,11 +293,21 @@
 
     async function handleTrackAction(trackUrl, actionType, trackLabel) {
         const arlToken = dzArlInput.value.trim();
+        const localDir = localDirInput.value.trim();
         const quality = document.getElementById('deezer-quality').value;
-
+        
         if (!arlToken) {
             alert('Deezer ARL token is required to stream or download music.');
             return;
+        }
+
+        // --- FIXED: DETERMINE TARGET INDEX (Does NOT update UI yet) ---
+        let currentVal = parseInt(indexCounterInput.value, 10);
+        if (isNaN(currentVal)) currentVal = 0; // Default to 0 if blank
+        
+        let targetIndexForBackend = '';
+        if (actionType !== 'stream') {
+            targetIndexForBackend = (currentVal + 1).toString();
         }
 
         const sessionId = 'dz_session_' + Math.random().toString(36).substring(2, 10);
@@ -305,6 +329,10 @@
             formData.append('session_id', sessionId);
             formData.append('url', trackUrl);
             formData.append('arl_token', arlToken);
+            formData.append('local_dir', localDir);
+            
+            // Send the target incremented index to the backend for the filename
+            formData.append('index_counter', targetIndexForBackend); 
             formData.append('quality', quality);
             formData.append('action', actionType);
 
@@ -314,37 +342,52 @@
             });
 
             eventSource.close();
+
             if (!response.ok) {
-                const errData = await response.json();
+                const errData = await response.json().catch(() => ({}));
                 throw new Error(errData.error || 'Server error occurred');
+            }
+
+            // --- SUCCESS! ONLY UPDATE THE COUNTER NOW ---
+            if (actionType !== 'stream') {
+                indexCounterInput.value = targetIndexForBackend;
+                localStorage.setItem('deezer_index_counter', targetIndexForBackend);
             }
 
             progressFill.style.width = '100%';
             spinner.style.display = 'none';
 
-            const disposition = response.headers.get('content-disposition');
-            let filename = trackLabel || 'deezer_track.mp3';
-            if (disposition && disposition.includes('filename=')) {
-                filename = disposition.split('filename=')[1].replace(/"/g, '');
-            }
-
-            const blob = await response.blob();
-            const mediaUrl = window.URL.createObjectURL(blob);
-
-            if (actionType === 'stream') {
-                statusText.innerText = 'Playing stream...';
-                audioPlayerContainer.style.display = 'block';
-                nowPlayingTitle.innerText = `Now Playing: ${filename}`;
-                audioPlayer.src = mediaUrl;
-                audioPlayer.play();
+            // Check if backend already saved the file locally (Returns JSON instead of the file)
+            const contentType = response.headers.get('content-type');
+            if (contentType && contentType.includes('application/json')) {
+                const data = await response.json();
+                statusText.innerText = data.message || 'Saved successfully!';
             } else {
-                statusText.innerText = 'Download complete! Check your browser downloads.';
-                const a = document.createElement('a');
-                a.href = mediaUrl;
-                a.download = filename;
-                document.body.appendChild(a);
-                a.click();
-                a.remove();
+                // Cloud / Render fallback or Streaming fallback
+                const disposition = response.headers.get('content-disposition');
+                let filename = trackLabel || 'deezer_track.mp3';
+                if (disposition && disposition.includes('filename=')) {
+                    filename = disposition.split('filename=')[1].replace(/"/g, '');
+                }
+
+                const blob = await response.blob();
+                const mediaUrl = window.URL.createObjectURL(blob);
+
+                if (actionType === 'stream') {
+                    statusText.innerText = 'Playing stream...';
+                    audioPlayerContainer.style.display = 'block';
+                    nowPlayingTitle.innerText = `Now Playing: ${filename}`;
+                    audioPlayer.src = mediaUrl;
+                    audioPlayer.play();
+                } else {
+                    statusText.innerText = 'Download complete! Check your browser downloads.';
+                    const a = document.createElement('a');
+                    a.href = mediaUrl;
+                    a.download = filename;
+                    document.body.appendChild(a);
+                    a.click();
+                    a.remove();
+                }
             }
         } catch (err) {
             eventSource.close();
