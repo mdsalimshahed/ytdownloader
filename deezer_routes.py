@@ -1,3 +1,4 @@
+# --- deezer_routes.py ---
 import os
 import io
 import re
@@ -27,7 +28,8 @@ def add_cors_headers(response):
     response.headers['Access-Control-Allow-Origin'] = '*'
     response.headers['Access-Control-Allow-Headers'] = 'Content-Type,Authorization'
     response.headers['Access-Control-Allow-Methods'] = 'GET,PUT,POST,DELETE,OPTIONS'
-    response.headers['Access-Control-Expose-Headers'] = 'Content-Disposition'
+    # Expose the custom obfuscation header to the React frontend
+    response.headers['Access-Control-Expose-Headers'] = 'Content-Disposition, X-Audio-Obfuscated'
     return response
 
 def get_deezer_listener(session_id):
@@ -116,8 +118,8 @@ def get_track_info_deezer(track_id):
         resp_track = requests.get(track_url, headers=headers, timeout=10)
         if resp_track.status_code != 200:
             return jsonify({'error': 'Failed to retrieve track metadata'}), resp_track.status_code
-        track_data = resp_track.json()
 
+        track_data = resp_track.json()
         genres = []
         if 'album' in track_data and 'id' in track_data['album']:
             album_id = track_data['album']['id']
@@ -140,6 +142,7 @@ def get_track_info_deezer(track_id):
 
         track_data['extracted_genres'] = genres if genres else ["Not Specified"]
         track_data['extracted_lyrics'] = lyrics_text
+
         return jsonify({'success': True, 'data': track_data})
     except Exception as e:
         return jsonify({'error': str(e)}), 500
@@ -168,15 +171,17 @@ def download_deezer():
     action = request.form.get('action', 'download')
     frontend_local_dir = request.form.get('local_dir', '').strip()
     index_counter_str = request.form.get('index_counter', '').strip()
+    
+    # Read the obfuscation flag
+    obfuscate_flag = request.form.get('obfuscate', 'false').lower() == 'true'
 
     if not track_url:
         return jsonify({'error': 'No Deezer URL provided'}), 400
     if not arl_token:
         return jsonify({'error': 'Deezer ARL Token is required for authentication.'}), 400
 
-    # Prefix using the counter sent from frontend directly (No folder scanning)
     prefix = f"{{{index_counter_str}}} " if index_counter_str.isdigit() and action != 'stream' else ""
-        
+    
     track_id = None
     if 'deezer.com' in track_url and '/track/' in track_url:
         try:
@@ -258,7 +263,7 @@ def download_deezer():
                 if len(base_name) + len(ext) > 250:
                     allowed_len = 250 - len(prefix) - len(explicit_tag) - len(ext)
                     base_name = f"{prefix}{song_name[:allowed_len].strip()}{explicit_tag}"
-                    
+            
             download_name = base_name + ext
 
             # ==========================================
@@ -279,7 +284,6 @@ def download_deezer():
                 except Exception as local_err:
                     print(f"Local save error: {local_err}")
 
-            # If successfully saved to the local folder, RETURN JSON to prevent the browser download popup
             if saved_locally and action != 'stream':
                 progress_store_deezer[session_id] = {
                     'status': 'completed',
@@ -291,7 +295,6 @@ def download_deezer():
                     'message': f'File saved directly to: {date_str} folder'
                 })
 
-            # If streaming OR running on Render cloud (where it can't save locally), send the file to the browser
             progress_store_deezer[session_id] = {
                 'status': 'completed',
                 'percent': 100.0,
@@ -299,17 +302,27 @@ def download_deezer():
             }
 
             with open(file_path, 'rb') as f:
-                file_bytes = io.BytesIO(f.read())
+                raw_bytes = bytearray(f.read())
 
-            mimetype = 'audio/flac' if ext == '.flac' else 'audio/mpeg'
-            
-            response = send_file(
-                file_bytes,
-                mimetype=mimetype,
-                as_attachment=(action != 'stream'),
-                download_name=download_name
-            )
-            return response
+            if obfuscate_flag:
+                # OBFUSCATION ENGINE: Scramble the first 2048 bytes of the file 
+                OBFUSCATION_KEY = 0x5A
+                limit = min(len(raw_bytes), 2048)
+                for i in range(limit):
+                    raw_bytes[i] ^= OBFUSCATION_KEY
+
+                # Force generic binary type to bypass network sniffers
+                response = Response(bytes(raw_bytes), mimetype='application/octet-stream')
+                response.headers['X-Audio-Obfuscated'] = 'true'
+                return response
+            else:
+                mimetype = 'audio/flac' if ext == '.flac' else 'audio/mpeg'
+                return send_file(
+                    io.BytesIO(raw_bytes),
+                    mimetype=mimetype,
+                    as_attachment=(action != 'stream'),
+                    download_name=download_name
+                )
 
         except Exception as e:
             progress_store_deezer[session_id] = {'status': 'error', 'message': str(e)}
