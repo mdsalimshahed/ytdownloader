@@ -1,0 +1,419 @@
+<!-- --- templates/translation_tab.html --- -->
+<style>
+    /* Two-Column Layout */
+    .workspace-grid {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 30px;
+        align-items: start;
+    }
+
+    /* Input & Results */
+    .lyric-workspace-card {
+        text-align: center;
+        padding: 30px 20px;
+        background: #f8f9fa;
+        border: 1px solid #dee2e6;
+        border-radius: 10px;
+    }
+    
+    .translation-line {
+        font-size: 1.1rem;
+        font-weight: 700;
+        color: #333;
+        margin-bottom: 20px;
+        line-height: 1.4;
+    }
+
+    .original-line {
+        font-size: 1.6rem;
+        font-weight: 600;
+        color: #000;
+        line-height: 1.6; /* Fixed: Removed the massive 2.8 line-height */
+        word-wrap: break-word;
+        white-space: pre-wrap;
+        text-align: center;
+    }
+
+    /* Bulletproof Flexbox Replacement */
+    .word-block {
+        display: inline-flex;
+        flex-direction: column;
+        align-items: center;
+        vertical-align: top;
+        margin: 0 6px 15px 6px; /* Added bottom margin so wrapped lines don't crash */
+    }
+
+    .word-orig {
+        color: #000;
+        line-height: 1.1; /* Forces the box to tightly hug the word */
+    }
+
+    .word-pron {
+        color: var(--primary);
+        font-size: 0.95rem;
+        font-family: monospace;
+        font-weight: 500;
+        letter-spacing: 0.5px;
+        margin-top: 2px; /* Pulls the pronunciation flush against the word */
+        line-height: 1.1;
+    }
+
+    /* Right Side: Execution Terminal */
+    .terminal-wrapper {
+        display: flex;
+        flex-direction: column;
+        height: 100%;
+    }
+
+    .terminal-header {
+        background: #343a40;
+        color: #fff;
+        padding: 8px 15px;
+        font-size: 0.85rem;
+        font-weight: bold;
+        border-top-left-radius: 10px;
+        border-top-right-radius: 10px;
+        text-transform: uppercase;
+        letter-spacing: 1px;
+    }
+
+    .execution-terminal {
+        background: #0d1117;
+        color: #00ff00;
+        font-family: 'Courier New', Courier, monospace;
+        font-size: 0.85rem;
+        padding: 15px;
+        border-bottom-left-radius: 10px;
+        border-bottom-right-radius: 10px;
+        height: 400px;
+        overflow-y: auto;
+        box-shadow: inset 0 0 10px rgba(0,0,0,0.8);
+        border: 1px solid #343a40;
+        border-top: none;
+        white-space: pre-wrap;
+    }
+    
+    .term-sys { color: #8a2be2; font-weight: bold; }
+    .term-err { color: #ff4444; }
+    .term-match { color: #00ffff; font-weight: bold; }
+</style>
+
+<div id="translation-tab-content" style="display: none;">
+    <div class="section-title" style="margin-bottom: 20px;">Translation & Brute-Force Alignment Workspace</div>
+    
+    <div class="workspace-grid">
+        <!-- LEFT COLUMN: Input Only -->
+        <div>
+            <textarea id="trans-input" placeholder="Type mixed text here (e.g., 'そう放った貴方を信じてる no man's world')..." style="min-height: 150px; font-size: 1rem; width: 100%; padding: 15px; box-sizing: border-box;"></textarea>
+            
+            <div id="trans-status-indicator" style="font-size: 0.85rem; color: var(--text-sub); margin-top: 8px; display: none; align-items: center; gap: 8px;">
+                <div class="spinner" style="width: 14px; height: 14px; border-width: 2px;"></div>
+                <span id="status-msg">Translating automatically...</span>
+            </div>
+        </div>
+
+        <!-- RIGHT COLUMN: Execution Terminal -->
+        <div class="terminal-wrapper">
+            <div class="terminal-header">Backend Execution Console</div>
+            <div id="terminal-output" class="execution-terminal">
+                <span class="term-sys">System Ready. Awaiting input for alignment...</span><br>
+            </div>
+        </div>
+    </div>
+
+    <!-- FULL WIDTH BOTTOM: Results Card -->
+    <div id="trans-results-card" class="lyric-workspace-card" style="display: none; margin-top: 25px;">
+        <div class="metadata-header" style="justify-content: center; margin-bottom: 15px; color: var(--text-sub);">
+            <span style="font-size: 0.85rem; text-transform: uppercase; letter-spacing: 1px;">
+                Detected: <strong id="res-lang" style="color: var(--primary);"></strong>
+            </span>
+        </div>
+        <div id="res-trans" class="translation-line">-</div>
+        <div id="res-aligned-text" class="original-line"></div>
+    </div>
+</div>
+
+<script>
+    const transInput = document.getElementById('trans-input');
+    const resultsCard = document.getElementById('trans-results-card');
+    const statusIndicator = document.getElementById('trans-status-indicator');
+    const statusMsg = document.getElementById('status-msg');
+    const terminal = document.getElementById('terminal-output');
+    
+    let translationDebounceTimer = null;
+    let activeController = null;
+
+    // Throttle helper (still used for retry backoff on actual errors)
+    const delay = ms => new Promise(res => setTimeout(res, ms));
+
+    // In-memory cache: identical text (e.g. a repeated word/line in the lyric)
+    // never has to hit the API twice in the same session.
+    const translationCache = new Map();
+
+    function logTerm(msg, type = '') {
+        let span = document.createElement('span');
+        if (type) span.className = type;
+        span.innerText = msg;
+        terminal.appendChild(span);
+        terminal.appendChild(document.createElement('br'));
+        terminal.scrollTop = terminal.scrollHeight;
+    }
+
+    ['input', 'paste'].forEach(eventType => {
+        transInput.addEventListener(eventType, () => {
+            clearTimeout(translationDebounceTimer);
+            if (activeController) activeController.abort();
+
+            const textValue = transInput.value.trim();
+
+            if (!textValue) {
+                statusIndicator.style.display = 'none';
+                resultsCard.style.display = 'none';
+                return;
+            }
+
+            statusIndicator.style.display = 'flex';
+            statusMsg.innerText = "Analyzing text...";
+            resultsCard.style.display = 'none';
+
+            translationDebounceTimer = setTimeout(() => {
+                runAutoTranslation(textValue);
+            }, 800);
+        });
+    });
+
+    async function fetchTranslation(text, signal, retries = 2) {
+        if (translationCache.has(text)) {
+            return translationCache.get(text);
+        }
+
+        for (let i = 0; i <= retries; i++) {
+            try {
+                const response = await fetch('/api/translate', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ text: text }),
+                    signal: signal
+                });
+                if (!response.ok) throw new Error(`HTTP ${response.status}`);
+                const data = await response.json();
+                translationCache.set(text, data);
+                return data;
+            } catch (err) {
+                if (signal.aborted) throw err;
+                if (i === retries) throw err;
+                await delay(500); 
+            }
+        }
+    }
+
+    function tokenizeForBruteForce(text) {
+        const tokens = [];
+        let currentWord = '';
+        
+        const isSpacelessScript = (char) => /[\u3000-\u303f\u3040-\u30ff\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff\uff66-\uff9f\uac00-\ud7af\u0e00-\u0e7f]/.test(char);
+
+        for (let char of text) {
+            if (/\s/.test(char)) {
+                if (currentWord) {
+                    tokens.push(currentWord);
+                    currentWord = '';
+                }
+            } else if (isSpacelessScript(char)) {
+                if (currentWord) {
+                    tokens.push(currentWord);
+                    currentWord = '';
+                }
+                tokens.push(char); 
+            } else {
+                currentWord += char; 
+            }
+        }
+        if (currentWord) tokens.push(currentWord);
+        return tokens;
+    }
+
+    async function runBruteForceAlignment(line, fullPron, signal) {
+        logTerm(`\n[INIT] Starting brute force on block: ${line}`, 'term-sys');
+        
+        let liner_main = fullPron.toLowerCase().split(/\s+/).reverse();
+        logTerm(`Target Array: ${JSON.stringify(liner_main)}`, 'term-sys');
+        
+        let w = '';
+        let add_to = [];
+        let word_gotten = 0;
+        
+        let tokenizedArr = tokenizeForBruteForce(line).reverse();
+        logTerm(`Tokenized Array: ${JSON.stringify(tokenizedArr)}`, 'term-sys');
+
+        for (let token of tokenizedArr) {
+            if (signal.aborted) throw new Error("Aborted");
+            
+            let prependStr = token;
+            if (w.length > 0 && /^[a-zA-Z0-9]/.test(w[0]) && /^[a-zA-Z0-9]/.test(token[token.length-1])) {
+                 prependStr = token + ' ';
+            }
+            w = prependStr + w;
+            
+            let contextStr = `(${line}) — ${w}`;
+            
+            let fetchRes = await fetchTranslation(contextStr, signal);
+            
+            let rawP = fetchRes.pronunciation || fetchRes.translation || '';
+            let p = rawP.toLowerCase().split(/[—\-]/).pop().replace(/[-.,()]/g, '').trim();
+            
+            let liner = liner_main[word_gotten] ? [liner_main[word_gotten]] : [];
+            
+            logTerm(`[ ${w} ] <-- [ ${token} ]                  [ ${p} ] <-->  ${liner.length ? liner[0] : '[]'}  [ ${word_gotten} ]`);
+
+            if (liner.length > 0 && (p === liner[0] || p.includes(liner[0]))) {
+                logTerm(`------type 1----------natural match---------`, 'term-match');
+                add_to.unshift({ text: w, pron: liner[0] });
+                w = '';
+                word_gotten++;
+                logToTermArray(add_to, word_gotten);
+                continue;
+            }
+
+            if (liner.length > 0 && p.replace(/\s/g, '') === liner[0]) {
+                logTerm(`------type 2----------separately match---------`, 'term-match');
+                add_to.unshift({ text: w, pron: liner[0] });
+                w = '';
+                word_gotten++;
+                logToTermArray(add_to, word_gotten);
+                continue;
+            }
+
+            if (liner.length === 0) {
+                logTerm(`------type Y----------residual trailing match---------`, 'term-match');
+                if (add_to.length > 0) {
+                    add_to[0].text = w + add_to[0].text;
+                } else {
+                    add_to.unshift({ text: w, pron: '' });
+                }
+                w = '';
+                logToTermArray(add_to, word_gotten);
+                continue;
+            }
+        }
+
+        if (w !== '') {
+            logTerm(`------type X----------bad match (leftovers)---------`, 'term-err');
+            add_to.unshift({ text: w.trim(), pron: liner_main[word_gotten] || '' });
+        }
+
+        let html = '';
+        add_to.forEach(item => {
+            html += `<span class="word-block"><span class="word-orig">${item.text}</span><span class="word-pron">${item.pron}</span></span>`;
+        });
+        return html;
+    }
+
+    function logToTermArray(arr, word_gotten) {
+        const textArr = arr.map(a => a.text);
+        logTerm(`Current State: ['${textArr.join("', '")}'] [ ${word_gotten} ]\n`);
+    }
+
+    async function runAutoTranslation(textInput) {
+        activeController = new AbortController();
+        const signal = activeController.signal;
+
+        try {
+            terminal.innerHTML = '';
+            logTerm(`System Ready. Awaiting input...`, 'term-sys');
+
+            const fullData = await fetchTranslation(textInput, signal);
+            document.getElementById('res-lang').innerText = fullData.srcLang || 'Unknown';
+            document.getElementById('res-trans').innerText = fullData.translation || 'N/A';
+
+            let isAsianLang = fullData.srcLang && (fullData.srcLang.startsWith('zh') || fullData.srcLang === 'ja');
+
+            if (isAsianLang) {
+                statusMsg.innerText = "Executing Word-by-Word Analysis...";
+                
+                const blocks = textInput.split(/\s+/).filter(b => b.length > 0);
+
+                // Each block's work is independent of every other block, so run them
+                // concurrently instead of one-at-a-time. Only the brute-force loop
+                // *inside* a single block stays sequential, since each of its steps
+                // depends on the match result of the step before it.
+                async function processBlock(block) {
+                    logTerm(`\n[ANALYZING BLOCK] "${block}"`, 'term-sys');
+
+                    const hasAsianChars = /[\u3000-\u303f\u3040-\u30ff\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff\uff66-\uff9f\uac00-\ud7af\u0e00-\u0e7f]/.test(block);
+
+                    if (!hasAsianChars) {
+                        logTerm(`-> Detected English/Latin word. Placing as is.`, 'term-match');
+                        return `<span class="word-block"><span class="word-orig">${block}</span></span>`;
+                    }
+
+                    const blockData = await fetchTranslation(block, signal);
+
+                    let blockLang = blockData.srcLang || 'auto';
+                    let blockPron = blockData.pronunciation || block;
+
+                    if (blockLang.startsWith('zh') || blockLang === 'ja') {
+                        const pronTokens = blockPron.trim().split(/\s+/).filter(t => t.length > 0);
+
+                        if (pronTokens.length === 1) {
+                            logTerm(`-> Pronunciation is exactly 1 block matching the word (1:1). Skipping brute-force.`, 'term-match');
+                            return `<span class="word-block"><span class="word-orig">${block}</span><span class="word-pron">${blockPron}</span></span>`;
+                        } else {
+                            logTerm(`-> Detected ${blockLang} with ${pronTokens.length} syllables. Applying brute-force alignment.`, 'term-match');
+                            return await runBruteForceAlignment(block, blockPron, signal);
+                        }
+                    } else {
+                        logTerm(`-> Detected ${blockLang} (Non-Asian). Skipping brute-force, mapping directly.`, 'term-err');
+                        return `<span class="word-block"><span class="word-orig">${block}</span><span class="word-pron">${blockPron}</span></span>`;
+                    }
+                }
+
+                const blockResults = await Promise.all(blocks.map(processBlock));
+                const finalFlexHtml = blockResults.join('');
+
+                document.getElementById('res-aligned-text').innerHTML = finalFlexHtml.trim();
+                logTerm(`\n[SUCCESS] Full alignment complete.`, 'term-sys');
+
+            } else {
+                logTerm(`Language is ${fullData.srcLang}. Skipping brute-force alignment.`, 'term-sys');
+                
+                const isPureLatin = /^[\u0000-\u024F\s\p{P}]+$/u.test(textInput);
+                
+                let finalHtml = '';
+                
+                if (!isPureLatin && fullData.pronunciation && fullData.pronunciation.toLowerCase() !== textInput.toLowerCase()) {
+                    const origWords = textInput.trim().split(/\s+/);
+                    const pronWords = fullData.pronunciation.trim().split(/\s+/);
+                    
+                    if (origWords.length === pronWords.length) {
+                        for (let i = 0; i < origWords.length; i++) {
+                            finalHtml += `<span class="word-block"><span class="word-orig">${origWords[i]}</span><span class="word-pron">${pronWords[i]}</span></span>`;
+                        }
+                    } else {
+                         finalHtml = `
+                            <div style="display:flex; flex-direction:column; align-items:center; width:100%;">
+                                <span class="word-orig" style="line-height:1.1;">${textInput}</span>
+                                <span class="word-pron">${fullData.pronunciation}</span>
+                            </div>
+                        `;
+                    }
+                } else {
+                    finalHtml = `<span class="word-block"><span class="word-orig">${textInput}</span></span>`;
+                }
+
+                document.getElementById('res-aligned-text').innerHTML = finalHtml;
+            }
+
+            resultsCard.style.display = 'block';
+
+        } catch (error) {
+            if (error.message !== 'Aborted') {
+                logTerm(`[ERROR] ${error.message}`, 'term-err');
+                console.error('Translation error:', error);
+            }
+        } finally {
+            statusIndicator.style.display = 'none';
+        }
+    }
+</script>

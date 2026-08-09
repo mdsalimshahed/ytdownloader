@@ -8,13 +8,14 @@
     <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
 </head>
 <body>
-<div class="container">
+<div class="container" id="main-container" style="transition: max-width 0.3s ease;">
     <h1>Media Studio</h1>
-
+    
     <!-- Segmented Navigation Tabs -->
     <div class="tab-nav">
         <button class="tab-btn active" onclick="switchTab('youtube')">YouTube Downloader</button>
         <button class="tab-btn" onclick="switchTab('deezer')">Deezer Search & Stream</button>
+        <button class="tab-btn" onclick="switchTab('translation')">Translator</button>
     </div>
 
     <!-- YouTube Tab -->
@@ -35,12 +36,14 @@
                 <button type="button" class="btn-mp4" id="btn-mp4" onclick="startDownload('mp4')">Download MP4</button>
                 <button type="button" class="btn-mp3" id="btn-mp3" onclick="startDownload('mp3')">Download MP3</button>
             </div>
+            
             <button type="button" class="btn-purge" onclick="purgeAll()">Purge All Settings & Storage</button>
         </form>
     </div>
 
-    <!-- Deezer Sub-Template Tab -->
+    <!-- Sub-Template Tabs -->
     {% include 'deezer_tab.html' %}
+    {% include 'translation_tab.html' %}
 
     <!-- Shared Progress & Loading Box -->
     <div id="progress-box" class="progress-box">
@@ -57,14 +60,25 @@
 <script>
     function switchTab(tab) {
         document.querySelectorAll('.tab-btn').forEach(btn => btn.classList.remove('active'));
+        
+        document.getElementById('youtube-tab-content').style.display = 'none';
+        document.getElementById('deezer-tab-content').style.display = 'none';
+        document.getElementById('translation-tab-content').style.display = 'none';
+
+        const mainContainer = document.getElementById('main-container');
+
         if (tab === 'youtube') {
             document.querySelectorAll('.tab-btn')[0].classList.add('active');
             document.getElementById('youtube-tab-content').style.display = 'block';
-            document.getElementById('deezer-tab-content').style.display = 'none';
-        } else {
+            mainContainer.style.maxWidth = '560px'; // Reset to default width
+        } else if (tab === 'deezer') {
             document.querySelectorAll('.tab-btn')[1].classList.add('active');
-            document.getElementById('youtube-tab-content').style.display = 'none';
             document.getElementById('deezer-tab-content').style.display = 'block';
+            mainContainer.style.maxWidth = '560px'; // Reset to default width
+        } else if (tab === 'translation') {
+            document.querySelectorAll('.tab-btn')[2].classList.add('active');
+            document.getElementById('translation-tab-content').style.display = 'block';
+            mainContainer.style.maxWidth = '1200px'; // Expand container for wide workspace
         }
         document.getElementById('progress-box').style.display = 'none';
     }
@@ -143,10 +157,11 @@
             alert('Please enter a valid YouTube URL.');
             return;
         }
-        const sessionId = 'session_' + Math.random().toString(36).substring(2, 10);
 
+        const sessionId = 'session_' + Math.random().toString(36).substring(2, 10);
         btnMp4.disabled = true;
         btnMp3.disabled = true;
+
         progressBox.style.display = 'block';
         spinner.style.display = 'block';
         progressFill.style.width = '0%';
@@ -165,6 +180,7 @@
             formData.append('url', cleanUrl);
             formData.append('format', format);
             formData.append('proxy_input', proxyInput.value.trim());
+
             if (cookiesInput.files[0]) {
                 formData.append('cookies_file', cookiesInput.files[0]);
             } else if (localStorage.getItem('cookies_text')) {
@@ -199,6 +215,7 @@
             a.click();
             a.remove();
             window.URL.revokeObjectURL(downloadUrl);
+
         } catch (err) {
             eventSource.close();
             spinner.style.display = 'none';

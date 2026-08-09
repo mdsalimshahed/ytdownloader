@@ -6,19 +6,23 @@ import time
 import tempfile
 import threading
 from urllib.parse import urlparse, parse_qs
+
 from flask import Flask, render_template, request, send_file, jsonify, Response
 from flask_cors import CORS
 import yt_dlp
 
-# Import the isolated Deezer blueprint
+# Import the isolated blueprints
 from deezer_routes import deezer_bp
+from translation_routes import translation_bp
 
 app = Flask(__name__)
 
 # ENABLE CORS: This stops the browser from blocking localhost requests!
 CORS(app, resources={r"/*": {"origins": "*"}})
 
+# Register Blueprints
 app.register_blueprint(deezer_bp)
+app.register_blueprint(translation_bp)
 
 progress_store = {}
 
@@ -50,26 +54,32 @@ def parse_proxy_input(raw_input: str) -> str:
     if not raw_input:
         return None
     raw_input = raw_input.strip()
+    
     if "http://" in raw_input or "https://" in raw_input:
         match = re.search(r'https?://[^\s\'"]+', raw_input)
         if match:
             return match.group(0)
+            
     match = re.search(r'([^:\s\'"]+):([^:\s\'"]+)@(\d{1,3}(?:\.\d{1,3}){3}):(\d+)', raw_input)
     if match:
         user, pwd, ip, port = match.groups()
         return f"http://{user}:{pwd}@{ip}:{port}"
+        
     match = re.search(r'(\d{1,3}(?:\.\d{1,3}){3}):(\d+):([^:\s\'"]+):([^:\s\'"]+)', raw_input)
     if match:
         ip, port, user, pwd = match.groups()
         return f"http://{user}:{pwd}@{ip}:{port}"
+        
     match = re.search(r'([^:\s\'"]+):([^:\s\'"]+):(\d{1,3}(?:\.\d{1,3}){3}):(\d+)', raw_input)
     if match:
         user, pwd, ip, port = match.groups()
         return f"http://{user}:{pwd}@{ip}:{port}"
+        
     match = re.search(r'(\d{1,3}(?:\.\d{1,3}){3}):(\d+)', raw_input)
     if match:
         ip, port = match.groups()
         return f"http://{ip}:{port}"
+        
     raise ValueError("Could not parse a valid proxy from the provided text.")
 
 def get_progress_hook(session_id):
@@ -183,6 +193,7 @@ def download_media():
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:
                 info = ydl.extract_info(video_url, download=True)
                 file_path = ydl.prepare_filename(info)
+                
                 if download_format == 'mp3':
                     file_path = os.path.splitext(file_path)[0] + '.mp3'
 
