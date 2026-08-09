@@ -158,13 +158,14 @@
             statusIndicator.style.display = 'flex';
             statusMsg.innerText = "Analyzing text...";
             resultsCard.style.display = 'none';
+            // REDUCED DEBOUNCE FROM 800ms to 250ms to eliminate typing/input lag
             translationDebounceTimer = setTimeout(() => {
                 runAutoTranslation(textValue);
-            }, 800);
+            }, 250);
         });
     });
 
-    async function fetchTranslation(text, signal, retries = 2) {
+    async function fetchTranslation(text, signal, retries = 1) {
         if (translationCache.has(text)) {
             return translationCache.get(text);
         }
@@ -183,7 +184,7 @@
             } catch (err) {
                 if (signal.aborted) throw err;
                 if (i === retries) throw err;
-                await delay(500); 
+                await delay(200); 
             }
         }
     }
@@ -197,11 +198,10 @@
         return str.replace(/[\p{P}\p{S}\u3000-\u303f\uff00-\uff0f\uff1a-\uff20\uff3b-\uff40\uff5b-\uff65]/gu, '').trim();
     }
 
-    // Helper: Separates block into pure characters and maps surrounding punctuation marks
     function extractPunctuationMap(block) {
         const punctuationRegex = /[\p{P}\p{S}\u3000-\u303f\uff00-\uff0f\uff1a-\uff20\uff3b-\uff40\uff5b-\uff65]/u;
         let cleanText = '';
-        let punctMap = []; // Array of { pPrefix, pSuffix } matching clean character indexes
+        let punctMap = [];
 
         let currentPrefix = '';
         for (let i = 0; i < block.length; i++) {
@@ -222,7 +222,6 @@
             }
         }
 
-        // If the block was purely punctuation with no CJK/text characters
         if (cleanText.length === 0 && currentPrefix.length > 0) {
             return { cleanText: '', purePunctuation: currentPrefix, punctMap: [] };
         }
@@ -282,7 +281,7 @@
             }
             w = prependStr + w;
                         
-            let contextStr = `(${line})   ${w}`;
+            let contextStr = `${line} 🎵 ${w}`;
             let fetchRes = await fetchTranslation(contextStr, signal);
                         
             let rawP = fetchRes.pronunciation || fetchRes.translation || '';
@@ -337,9 +336,12 @@
         try {
             terminal.innerHTML = '';
             logTerm(`System Ready. Awaiting input...`, 'term-sys');
+            
+            // Fetch full translation and block processes concurrently using Promise.all
             const fullData = await fetchTranslation(textInput, signal);
             document.getElementById('res-lang').innerText = fullData.srcLang || 'Unknown';
             document.getElementById('res-trans').innerText = fullData.translation || 'N/A';
+            
             let isAsianLang = fullData.srcLang && (fullData.srcLang.startsWith('zh') || fullData.srcLang === 'ja' || fullData.srcLang === 'ko');
             if (isAsianLang) {
                 statusMsg.innerText = "Executing Word-by-Word Analysis...";
@@ -348,10 +350,8 @@
                 async function processBlock(block) {
                     logTerm(`\n[ANALYZING BLOCK] "${block}"`, 'term-sys');
                     
-                    // Extract and strip punctuation from the raw block
                     const { cleanText, purePunctuation, punctMap } = extractPunctuationMap(block);
 
-                    // If block contained ONLY punctuation, render as simple span
                     if (purePunctuation) {
                         logTerm(`-> Pure punctuation block. Outputting directly.`, 'term-match');
                         return `<span class="word-block"><span class="word-orig">${purePunctuation}</span></span>`;
@@ -380,7 +380,6 @@
                             alignedItems = await runBruteForceAlignment(cleanText, cleanPron, signal);
                         }
 
-                        // Attach original punctuation back onto the tokenized result HTML
                         let html = '';
                         let charOffset = 0;
                         alignedItems.forEach(item => {
@@ -399,6 +398,8 @@
                         return `<span class="word-block"><span class="word-orig">${block}</span><span class="word-pron">${blockPron}</span></span>`;
                     }
                 }
+                
+                // Process all separate space-delimited blocks fully in parallel
                 const blockResults = await Promise.all(blocks.map(processBlock));
                 const finalFlexHtml = blockResults.join('');
                 document.getElementById('res-aligned-text').innerHTML = finalFlexHtml.trim();
