@@ -131,9 +131,7 @@
     const statusMsg = document.getElementById('status-msg');
     const terminal = document.getElementById('terminal-output');
              
-    let translationDebounceTimer = null;
     let activeController = null;
-    const delay = ms => new Promise(res => setTimeout(res, ms));
     const translationCache = new Map();
 
     function logTerm(msg, type = '') {
@@ -152,7 +150,6 @@
 
     ['input', 'paste'].forEach(eventType => {
         transInput.addEventListener(eventType, () => {
-            clearTimeout(translationDebounceTimer);
             if (activeController) activeController.abort();
             const textValue = transInput.value.trim();
             if (!textValue) {
@@ -163,9 +160,9 @@
             statusIndicator.style.display = 'flex';
             statusMsg.innerText = "Analyzing text...";
             resultsCard.style.display = 'none';
-            translationDebounceTimer = setTimeout(() => {
-                runAutoTranslation(textValue);
-            }, 250);
+            
+            // Execute instantly without any debounce delay
+            runAutoTranslation(textValue);
         });
     });
 
@@ -188,13 +185,13 @@
             } catch (err) {
                 if (signal.aborted) throw err;
                 if (i === retries) throw err;
-                await delay(200); 
+                // Artificial delay removed for instant retries
             }
         }
     }
 
-    function isSpacelessScript(char) {
-        return /[\u3000-\u303f\u3040-\u30ff\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff\uff66-\uff9f\uac00-\ud7af\u0e00-\u0e7f\uff00-\uffef]/.test(char);
+    function isSpacelessScript(str) {
+        return /[\u3000-\u303f\u3040-\u30ff\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff\uff66-\uff9f\uac00-\ud7af\u0e00-\u0e7f\uff00-\uffef]/.test(str);
     }
 
     // Exact replicas of Python p1 and p2 punctuation maps
@@ -237,12 +234,10 @@
     async function runBruteForceAlignment(line, fullPron, signal) {
         logTerm(`\n[INIT] Starting brute force on block: ${line}`, 'term-sys');
 
-        // Initial setup matching Python: j, k = translating(line.replace(' ', ''))
         const fetchResMain = await fetchTranslation(line.replace(/\s+/g, ''), signal);
         let j = fetchResMain.translation || '';
         let k = fetchResMain.pronunciation || fullPron || fetchResMain.translation || '';
 
-        // Clean punctuation as in Python: pron = k.translate(p2).translate(p1).replace('-','')
         let pronCleaned = cleanPunctuationPythonStyle(k.toLowerCase());
         let liner_main = pronCleaned.split(/\s+/).filter(t => t.length > 0).reverse();
 
@@ -252,7 +247,7 @@
         let character = '';
         let add_to = [];
         let word_gotten = 0;
-        let p = ''; // Moved outside the loop to match Python scoping!
+        let p = ''; // Maintained outer scope
 
         const lineChars = Array.from(line).reverse();
 
@@ -261,15 +256,13 @@
             character = char;
             w = character + w;
 
-            // Python context string: '(' + line + ') — ' + w
             let contextStr = `(${line}) — ${w}`;
             let fetchRes = await fetchTranslation(contextStr, signal);
             let rawP = fetchRes.pronunciation || fetchRes.translation || '';
 
-            // Extract p exactly like Python: p.lower().split('—')[-1].lstrip('-.,').strip().translate(p2).translate(p1).replace('-','')
             let parts = rawP.toLowerCase().split('—');
             let lastSegment = parts[parts.length - 1].replace(/^[-.,]+/, '').trim();
-            p = cleanPunctuationPythonStyle(lastSegment); // Mutating outer variable
+            p = cleanPunctuationPythonStyle(lastSegment); 
 
             let liner = liner_main.slice(word_gotten, word_gotten + 1);
 
@@ -311,7 +304,6 @@
             // --- TYPE 4 & TYPE 5: Multiple words returned in p ---
             let pSplit = p.split(/\s+/).filter(x => x.length > 0);
             if (pSplit.length > 1) {
-                // Type 4: Second word match
                 if (pSplit.length === 2 && w.length === 2 && liner.length > 0 && pSplit[pSplit.length - 1] === liner[0]) {
                     logTerm(`------type 4----------second word match---------`, 'term-match');
                     add_to.unshift({ text: w.substring(1), pron: liner[0] });
@@ -320,7 +312,6 @@
                     logToTermArray(add_to, word_gotten);
                 }
 
-                // Type 5: Further second word match
                 let linerCurrent = liner_main.slice(word_gotten, word_gotten + 1);
                 if (linerCurrent.length > 0 && pSplit[0] === linerCurrent[0]) {
                     logTerm(`------type 5----------further second word match---------`, 'term-match');
@@ -335,7 +326,7 @@
             }
         }
 
-        // --- POST-LOOP RESIDUAL HANDLING (type X & MEGA ULTRA PSYCHO CRAZY ULTIMATE) ---
+        // --- POST-LOOP RESIDUAL HANDLING ---
         if (w !== '') {
             logTerm(`[ ${w} ] <-- [ ${character} ]                  [ ${p} ] <--> ${JSON.stringify(liner_main.slice(word_gotten, word_gotten + 1))}`);
             logTerm(`------type X----------bad match---------`, 'term-err');
@@ -402,92 +393,77 @@
             terminal.innerHTML = '';
             logTerm(`System Ready. Awaiting input...`, 'term-sys');
                          
+            // 1. Fetch full string translation for the top display
             const fullData = await fetchTranslation(textInput, signal);
             document.getElementById('res-lang').innerText = fullData.srcLang || 'Unknown';
             document.getElementById('res-trans').innerText = fullData.translation || 'N/A';
                          
-            let isAsianLang = fullData.srcLang && (fullData.srcLang.startsWith('zh') || fullData.srcLang === 'ja' || fullData.srcLang === 'ko');
-            if (isAsianLang) {
-                statusMsg.innerText = "Executing Word-by-Word Analysis...";
-                                                 
-                const blocks = textInput.split(/\s+/).filter(b => b.length > 0);
-                async function processBlock(block) {
-                    logTerm(`\n[ANALYZING BLOCK] "${block}"`, 'term-sys');
-                                         
-                    const { cleanText, purePunctuation, punctMap } = extractPunctuationMap(block);
-                    if (purePunctuation) {
-                        logTerm(`-> Pure punctuation block. Outputting directly.`, 'term-match');
-                        return `<span class="word-block"><span class="word-orig">${purePunctuation}</span></span>`;
+            statusMsg.innerText = "Executing Word-by-Word Analysis...";
+                                             
+            // 2. Process ALL texts word-by-word natively
+            const blocks = textInput.split(/\s+/).filter(b => b.length > 0);
+            
+            async function processBlock(block) {
+                logTerm(`\n[ANALYZING BLOCK] "${block}"`, 'term-sys');
+                                     
+                const { cleanText, purePunctuation, punctMap } = extractPunctuationMap(block);
+                if (purePunctuation) {
+                    logTerm(`-> Pure punctuation block. Outputting directly.`, 'term-match');
+                    return `<span class="word-block"><span class="word-orig">${purePunctuation}</span></span>`;
+                }
+                
+                const blockData = await fetchTranslation(cleanText, signal);
+                let blockLang = blockData.srcLang || 'auto';
+                
+                // 3. Conditional gate: Is it an Asian script AND registered as an Asian language?
+                let isAsianScript = isSpacelessScript(cleanText);
+                let isAsianLang = blockLang.startsWith('zh') || blockLang === 'ja' || blockLang === 'ko';
+
+                if (isAsianLang && isAsianScript) {
+                    let blockPron = blockData.pronunciation || blockData.translation || cleanText;
+                    const cleanPron = cleanPunctuationPythonStyle(blockPron);
+                    const pronTokens = cleanPron.trim().split(/\s+/).filter(t => t.length > 0);
+                                             
+                    let alignedItems = [];
+                    if (pronTokens.length <= 1) {
+                        logTerm(`-> Pronunciation is 1 block or less. Skipping brute-force.`, 'term-match');
+                        alignedItems = [{ text: cleanText, pron: cleanPron }];
+                    } else {
+                        logTerm(`-> Detected ${blockLang} with ${pronTokens.length} syllables. Applying brute-force alignment.`, 'term-match');
+                        alignedItems = await runBruteForceAlignment(cleanText, cleanPron, signal);
                     }
-                    const hasAsianChars = isSpacelessScript(cleanText);
-                    if (!hasAsianChars) {
-                        logTerm(`-> Detected English/Latin word. Placing as is.`, 'term-match');
+                    
+                    let html = '';
+                    let charOffset = 0;
+                    alignedItems.forEach(item => {
+                        let itemLength = item.text.length;
+                        let prefixPunct = punctMap[charOffset] ? punctMap[charOffset].prefix : '';
+                        let suffixPunct = punctMap[charOffset + itemLength - 1] ? punctMap[charOffset + itemLength - 1].suffix : '';
+                                                     
+                        let restoredText = `${prefixPunct}${item.text}${suffixPunct}`;
+                        html += `<span class="word-block"><span class="word-orig">${restoredText}</span><span class="word-pron">${item.pron}</span></span>`;
+                        charOffset += itemLength;
+                    });
+                    return html;
+                } else {
+                    // 4. Default path for standard space-separated languages (Spanish, Arabic, etc.)
+                    logTerm(`-> Detected ${blockLang} (Non-brute-force path). Mapping directly.`, 'term-match');
+                    
+                    // Display pronunciation (if Arabic/Russian etc.) or meaning/translation (Spanish/French) underneath
+                    let displaySub = blockData.pronunciation || blockData.translation || '';
+                    
+                    // Optional: if the translation is identical to the original word, we can leave it blank to avoid redundancy
+                    if (displaySub.toLowerCase() === cleanText.toLowerCase()) {
                         return `<span class="word-block"><span class="word-orig">${block}</span></span>`;
                     }
-                    const blockData = await fetchTranslation(cleanText, signal);
-                    let blockLang = blockData.srcLang || 'auto';
-                    let blockPron = blockData.pronunciation || cleanText;
-                    if (blockLang.startsWith('zh') || blockLang === 'ja' || blockLang === 'ko') {
-                        const cleanPron = cleanPunctuationPythonStyle(blockPron);
-                        const pronTokens = cleanPron.trim().split(/\s+/).filter(t => t.length > 0);
-                                                 
-                        let alignedItems = [];
-                        if (pronTokens.length === 1) {
-                            logTerm(`-> Pronunciation is exactly 1 block matching the word (1:1). Skipping brute-force.`, 'term-match');
-                            alignedItems = [{ text: cleanText, pron: cleanPron }];
-                        } else {
-                            logTerm(`-> Detected ${blockLang} with ${pronTokens.length} syllables. Applying brute-force alignment.`, 'term-match');
-                            alignedItems = await runBruteForceAlignment(cleanText, cleanPron, signal);
-                        }
-                        let html = '';
-                        let charOffset = 0;
-                        alignedItems.forEach(item => {
-                            let itemLength = item.text.length;
-                            let prefixPunct = punctMap[charOffset] ? punctMap[charOffset].prefix : '';
-                            let suffixPunct = punctMap[charOffset + itemLength - 1] ? punctMap[charOffset + itemLength - 1].suffix : '';
-                                                         
-                            let restoredText = `${prefixPunct}${item.text}${suffixPunct}`;
-                            html += `<span class="word-block"><span class="word-orig">${restoredText}</span><span class="word-pron">${item.pron}</span></span>`;
-                            charOffset += itemLength;
-                        });
-                        return html;
-                    } else {
-                        logTerm(`-> Detected ${blockLang} (Non-Asian). Skipping brute-force, mapping directly.`, 'term-err');
-                        return `<span class="word-block"><span class="word-orig">${block}</span><span class="word-pron">${blockPron}</span></span>`;
-                    }
+                    return `<span class="word-block"><span class="word-orig">${block}</span><span class="word-pron">${displaySub}</span></span>`;
                 }
-                                 
-                const blockResults = await Promise.all(blocks.map(processBlock));
-                const finalFlexHtml = blockResults.join('');
-                document.getElementById('res-aligned-text').innerHTML = finalFlexHtml.trim();
-                logTerm(`\n[SUCCESS] Full alignment complete.`, 'term-sys');
-            } else {
-                logTerm(`Language is ${fullData.srcLang}. Skipping brute-force alignment.`, 'term-sys');
-                                                 
-                const isPureLatin = /^[\u0000-\u024F\s\p{P}]+$/u.test(textInput);
-                let finalHtml = '';
-                                                 
-                if (!isPureLatin && fullData.pronunciation && fullData.pronunciation.toLowerCase() !== textInput.toLowerCase()) {
-                    const origWords = textInput.trim().split(/\s+/);
-                    const pronWords = fullData.pronunciation.trim().split(/\s+/);
-                                                             
-                    if (origWords.length === pronWords.length) {
-                        for (let i = 0; i < origWords.length; i++) {
-                            finalHtml += `<span class="word-block"><span class="word-orig">${origWords[i]}</span><span class="word-pron">${cleanPunctuationPythonStyle(pronWords[i])}</span></span>`;
-                        }
-                    } else { 
-                        finalHtml = `
-                            <div style="display:flex; flex-direction:column; align-items:center; width:100%;">
-                                <span class="word-orig" style="line-height:1.1;">${textInput}</span>
-                                <span class="word-pron">${cleanPunctuationPythonStyle(fullData.pronunciation)}</span>
-                            </div>
-                        `;
-                    }
-                } else {
-                    finalHtml = `<span class="word-block"><span class="word-orig">${textInput}</span></span>`;
-                }
-                document.getElementById('res-aligned-text').innerHTML = finalHtml;
             }
+                             
+            const blockResults = await Promise.all(blocks.map(processBlock));
+            const finalFlexHtml = blockResults.join('');
+            document.getElementById('res-aligned-text').innerHTML = finalFlexHtml.trim();
+            logTerm(`\n[SUCCESS] Full alignment complete.`, 'term-sys');
             resultsCard.style.display = 'block';
         } catch (error) {
             if (error.message !== 'Aborted') {
