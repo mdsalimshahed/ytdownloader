@@ -341,11 +341,11 @@
             } else {
                 logTerm(`------type MEGA ULTRA PSYCHO CRAZY ULTIMATE----------bad match---------`, 'term-err');
                 let line1 = w;
-                let fetchRes1 = await fetchTranslation(line1, signal);
-                let j1 = fetchRes1.translation || '';
-                let k1 = fetchRes1.pronunciation || fetchRes1.translation || '';
-                let pron1 = cleanPunctuationPythonStyle(k1.toLowerCase());
-                let liner_main1 = pron1.split(/\s+/).filter(x => x.length > 0);
+                // let fetchRes1 = await fetchTranslation(line1, signal);
+                // let j1 = fetchRes1.translation || '';
+                // let k1 = fetchRes1.pronunciation || fetchRes1.translation || '';
+                // let pron1 = cleanPunctuationPythonStyle(k1.toLowerCase());
+                let liner_main1 = liner_main.slice(word_gotten).reverse();
 
                 let w1 = '';
                 let character1 = '';
